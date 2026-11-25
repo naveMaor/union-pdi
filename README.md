@@ -20,7 +20,7 @@ See docs/PLAN.md for the implementation plan.
 
 ## Assignment
 
-Requirements are defined in SPEC.md.
+Requirements are defined in `docs/assignment/SPEC.md`.
 
 ## Development
 

@@ -4,7 +4,7 @@
 ## Project Goal
 
 Build the full-stack Union Motors PDI planning system
-according to SPEC.md.
+according to docs/assignment/SPEC.md.
 
 ## Technology Stack
 
@@ -101,7 +101,7 @@ Status: NOT STARTED
 
 Acceptance:
 200 selected vehicles, matching section 14
-of SPEC.md.
+of docs/assignment/SPEC.md.
 
 ### Task 3 — Planner Operations
 Status: NOT STARTED
@@ -160,7 +160,7 @@ Status: NOT STARTED
 
 ## Development Rules
 
-1. SPEC.md is the source of truth.
+1. docs/assignment/SPEC.md is the source of truth.
 2. Implement one task at a time.
 3. Keep business rules on the server.
 4. Test before moving to the next task.
