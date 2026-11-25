@@ -66,11 +66,35 @@ Verification:
 - Data persists in the named volume `union-pdi_pdi_db_data`.
 
 #### Step 1.5 — Database Schema
-- [ ] Install and configure Sequelize ORM
-- [ ] Design database relationships
-- [ ] Create Sequelize migrations
-- [ ] Apply database constraints
-- [ ] Run migrations successfully
+- [x] Install and configure Sequelize ORM
+- [x] Design database relationships
+- [x] Create Sequelize migrations
+- [x] Apply database constraints
+- [x] Run migrations successfully
+
+Verification:
+- 8 tables (vehicles, settings, brand_quotas, shipping_capacities, plans,
+  plan_vehicles, manual_exclusions, audit_events) migrated successfully
+  against `union_pdi` (dev DB), which remains at 0 rows.
+- `server/src/db.test.js`: 12/12 passing, run against an isolated,
+  uniquely-named disposable database (`union_pdi_test_<pid>`) created and
+  dropped by the test itself; a guard assertion refuses to run unless the
+  resolved name matches that pattern and differs from `POSTGRES_DB`.
+- `audit_events` confirmed to persist `actor_name`, `actor_role` (NOT NULL,
+  CHECK'd) and `created_at` (NOT NULL) on every event.
+- `git diff --check`: clean.
+
+Deferred business-rule enforcement (schema/DB-level only; NOT yet
+implemented — do not treat as satisfied until service-layer code exists):
+- `manual_exclusions.note` is not NOT-NULL-enforced for `reason_code=OTHER`
+  (SPEC 8.3). Must be enforced in the service layer before Task 3.
+- `plans.capacity_snapshot` / `brand_quotas_snapshot` columns exist but
+  their population/validation (SPEC 5.3 — parameter changes must not affect
+  an existing plan) is not implemented; required in Task 2.
+- Unique-violation handling (Postgres `23505` on `plans.plan_date` and
+  `plan_vehicles`/`manual_exclusions` unique indexes) is enforced at the DB
+  level only; the API must translate these into clean 409/validation
+  responses in Task 2/3, not raw DB errors.
 
 #### Step 1.6 — Seed Data
 - [ ] Implement CSV import
