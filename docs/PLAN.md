@@ -21,7 +21,7 @@ according to docs/assignment/SPEC.md.
 
 
 ### Task 1 — Project Foundation and Database
-Status: IN PROGRESS
+Status: COMPLETE
 
 #### Step 1.1 — Development Environment
 - [x] Verify Node.js, npm, Git and Docker
@@ -97,21 +97,41 @@ implemented — do not treat as satisfied until service-layer code exists):
   responses in Task 2/3, not raw DB errors.
 
 #### Step 1.6 — Seed Data
-- [ ] Implement CSV import
-- [ ] Import 300 vehicles
-- [ ] Seed default settings and quotas
-- [ ] Make the seed process idempotent
+- [x] Implement CSV import
+- [x] Import 300 vehicles
+- [x] Seed default settings and quotas
+- [x] Make the seed process idempotent
 
 #### Step 1.7 — Database Verification
-- [ ] Verify 300 vehicles in PostgreSQL
-- [ ] Verify 262 eligible vehicles
-- [ ] Verify seed does not create duplicates
-- [ ] Verify default settings
+- [x] Verify 300 vehicles in PostgreSQL
+- [x] Verify 262 eligible vehicles
+- [x] Verify seed does not create duplicates
+- [x] Verify default settings
 
 Acceptance:
 300 vehicles exist in PostgreSQL.
 Rerunning the seed does not create duplicates.
 All required database tables and constraints exist.
+
+Verification:
+- `npm run db:seed` (from `server/`) ran against the dev DB (`union_pdi`):
+  300 vehicles, 1 settings row (200/9/14), 5 brand_quotas rows (Toyota
+  55/HARD, Lexus 36/HARD, Geely 32/FLEX, GAC 22/HARD, Zeekr 28/FLEX), 4
+  shipping_capacities rows (65 each) — matches SPEC §5.3/§7.
+- SPEC §14 test 2: 262 eligible / 38 ineligible (9 not customs-released, 29
+  with an active blocker, confirmed disjoint), verified directly via SQL
+  against the dev DB.
+- SECURITY_FORCES present on exactly PDI-220/260/270 (SPEC §9 examples).
+- Reran `npm run db:seed` a second time against the dev DB: still exactly
+  300 vehicles / 300 distinct `vehicle_id`s, 1/5/4 config rows — no
+  duplicates, confirming idempotency on the actual dev DB, not only in test
+  DBs.
+- `server/src/seed.test.js` (new): 4 tests, covering fresh-seed counts/field
+  values, §14 eligibility split, idempotency, and non-destructive reseed
+  (seed does not overwrite settings/brand_quotas/shipping_capacities/vehicle
+  fields already changed from defaults) — run against an isolated,
+  PID-suffixed disposable database, never the dev DB.
+- Full suite: `npm test` → 16/16 passing (12 from Step 1.5 + 4 new).
 
 ### Task 2 — Recommendation Algorithm
 Status: NOT STARTED
