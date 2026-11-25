@@ -19,22 +19,68 @@ according to SPEC.md.
 
 ## Development Tasks
 
+
 ### Task 1 — Project Foundation and Database
 Status: IN PROGRESS
 
-- [ ] Initialize Fastify backend
-- [ ] Configure PostgreSQL using Docker
-- [ ] Configure Sequelize ORM
-- [ ] Design database schema
-- [ ] Create database migrations
-- [ ] Import 300 vehicles from CSV
-- [ ] Seed initial configuration values
-- [ ] Verify repeatable seed execution
+#### Step 1.1 — Development Environment
+- [x] Verify Node.js, npm, Git and Docker
+- [x] Configure Node.js 24 using NVM
+- [x] Fix project directory permissions
+
+#### Step 1.2 — Project Initialization
+- [x] Initialize Git repository on main branch
+- [x] Create project directory structure
+- [x] Add SPEC.md and vehicle CSV
+- [x] Create CLAUDE.md
+- [x] Create docs/PLAN.md
+- [x] Create initial README.md and .gitignore
+- [x] Create initial Git commit
+
+#### Step 1.3 — Fastify Backend
+- [x] Initialize Node.js backend
+- [x] Install Fastify and CORS
+- [x] Create application factory (src/app.js)
+- [x] Create server entry point (src/index.js)
+- [x] Add GET /ping endpoint
+- [x] Configure npm dev and start scripts
+- [x] Configure Node.js built-in test runner
+- [x] Write and pass /ping API test
+
+Verification:
+- Fastify starts successfully on port 3001.
+- GET /ping returns HTTP 200.
+- npm test: 1 passed, 0 failed.
+
+#### Step 1.4 — PostgreSQL
+- [ ] Start PostgreSQL using Docker
+- [ ] Configure persistent database storage
+- [ ] Configure database environment variables
+- [ ] Verify database connection
+
+#### Step 1.5 — Database Schema
+- [ ] Install and configure Sequelize ORM
+- [ ] Design database relationships
+- [ ] Create Sequelize migrations
+- [ ] Apply database constraints
+- [ ] Run migrations successfully
+
+#### Step 1.6 — Seed Data
+- [ ] Implement CSV import
+- [ ] Import 300 vehicles
+- [ ] Seed default settings and quotas
+- [ ] Make the seed process idempotent
+
+#### Step 1.7 — Database Verification
+- [ ] Verify 300 vehicles in PostgreSQL
 - [ ] Verify 262 eligible vehicles
+- [ ] Verify seed does not create duplicates
+- [ ] Verify default settings
 
 Acceptance:
 300 vehicles exist in PostgreSQL.
 Rerunning the seed does not create duplicates.
+All required database tables and constraints exist.
 
 ### Task 2 — Recommendation Algorithm
 Status: NOT STARTED
