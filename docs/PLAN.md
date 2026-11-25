@@ -53,10 +53,17 @@ Verification:
 - npm test: 1 passed, 0 failed.
 
 #### Step 1.4 — PostgreSQL
-- [ ] Start PostgreSQL using Docker
-- [ ] Configure persistent database storage
-- [ ] Configure database environment variables
-- [ ] Verify database connection
+- [x] Start PostgreSQL using Docker
+- [x] Configure persistent database storage
+- [x] Configure database environment variables
+- [x] Verify database connection
+
+Verification:
+- `docker compose up -d db` starts `postgres:17`, container `union-pdi-db-1`.
+- Health check (`pg_isready`) reports `healthy`.
+- `psql` via the container confirms database `union_pdi`, user `pdi`, PostgreSQL 17.12.
+- Container restart verified: health returns to `healthy` and the database/user query succeeds again.
+- Data persists in the named volume `union-pdi_pdi_db_data`.
 
 #### Step 1.5 — Database Schema
 - [ ] Install and configure Sequelize ORM
