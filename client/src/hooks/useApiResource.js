@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react';
  * the race).
  */
 export function useApiResource(fetchFn, deps) {
-  const [state, setState] = useState({ data: null, loading: true, error: null });
+  const [state, setState] = useState({ data: null, loading: true, error: null, deps });
   const requestIdRef = useRef(0);
 
   // This hook's whole point is to re-run the fetch whenever caller-supplied
@@ -23,22 +23,24 @@ export function useApiResource(fetchFn, deps) {
     // internally) — there's no prop/state to derive this from during render,
     // it only makes sense in response to the effect re-running.
     // oxlint-disable-next-line react/set-state-in-effect
-    setState((prev) => ({ ...prev, loading: true, error: null }));
+    setState((prev) => ({ ...prev, loading: true, error: null, deps }));
 
     fetchFn(controller.signal)
       .then((data) => {
-        if (requestId !== requestIdRef.current) return;
-        setState({ data, loading: false, error: null });
+        if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+        setState({ data, loading: false, error: null, deps });
       })
       .catch((error) => {
-        if (error.name === 'AbortError') return;
+        if (controller.signal.aborted || error.name === 'AbortError') return;
         if (requestId !== requestIdRef.current) return;
-        setState({ data: null, loading: false, error });
+        setState({ data: null, loading: false, error, deps });
       });
 
     return () => controller.abort();
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  return state;
+  // Treat a new revision or filter as loading before the fetch effect starts.
+  const stale = deps.some((dep, index) => !Object.is(dep, state.deps[index]));
+  return { data: state.data, loading: stale || state.loading, error: stale ? null : state.error };
 }

@@ -47,6 +47,8 @@ function toQueryString(params) {
 
 export const api = {
   getPlan: (role, { signal } = {}) => request('/plan', { role, signal }),
+  generatePlan: (role, { confirm = false } = {}) =>
+    request('/plan/generate', { method: 'POST', role, body: confirm ? { confirm: true } : undefined }),
   getVehicles: (role, params, { signal } = {}) =>
     request(`/vehicles${toQueryString(params)}`, { role, signal }),
   getSettings: (role, { signal } = {}) => request('/settings', { role, signal }),

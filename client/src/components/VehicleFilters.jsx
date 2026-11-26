@@ -1,6 +1,6 @@
 import { TABS, BRANDS, SOURCE_LOCATIONS } from '../constants';
 
-export function VehicleFilters({ filters, counts, onChange }) {
+export function VehicleFilters({ filters, counts, onChange, actions }) {
   return (
     <div className="vehicle-filters">
       <div className="vehicle-toolbar-heading">
@@ -19,6 +19,7 @@ export function VehicleFilters({ filters, counts, onChange }) {
             </button>
           ))}
         </div>
+        {actions}
       </div>
 
       <div className="filter-row">
