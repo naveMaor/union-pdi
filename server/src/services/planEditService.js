@@ -44,6 +44,12 @@ async function computeSuggestedReplacement(plan, transaction) {
   const planVehicles = await db.PlanVehicle.findAll({ where: { plan_id: plan.id }, transaction, raw: true });
   const planVehicleIds = new Set(planVehicles.map((pv) => pv.vehicle_id));
 
+  // SPEC §8.4: addition requires room in capacity ("יש מקום בקיבולת"), checked
+  // against this plan's own frozen capacity_snapshot — not live settings.
+  if (planVehicleIds.size >= plan.capacity_snapshot) {
+    return null;
+  }
+
   const activeExclusions = await db.ManualExclusion.findAll({
     where: { plan_id: plan.id, cancelled_at: null },
     transaction,
@@ -81,6 +87,37 @@ async function computeSuggestedReplacement(plan, transaction) {
   });
 
   return result.selected[0] || null;
+}
+
+/**
+ * Returns the current suggested replacement without mutating anything (SPEC §8.4).
+ * Lets the planner screen recover the suggestion after a page refresh, since the
+ * suggestion is otherwise only returned inline from exclude/confirm. Read-only:
+ * no PlanVehicle/ManualExclusion write, no audit event. Confirmation still
+ * recomputes and revalidates the suggestion itself before inserting anything.
+ *
+ * @param {object} params
+ * @param {string} params.actorRole - must be 'PLANNER'
+ */
+async function getReplacementSuggestion({ actorRole }) {
+  assertPlannerRole(actorRole);
+
+  // REPEATABLE READ so every query inside computeSuggestedReplacement (plan,
+  // membership, exclusions, candidate pool) sees one consistent snapshot, even
+  // though this is read-only and takes no advisory lock. Confirmation still
+  // recomputes and revalidates fresh inside its own locked transaction before
+  // inserting anything, so this is a consistency guarantee for the read, not a
+  // correctness dependency for the write.
+  return db.sequelize.transaction(
+    { isolationLevel: db.Sequelize.Transaction.ISOLATION_LEVELS.REPEATABLE_READ },
+    async (transaction) => {
+      const plan = await db.Plan.findOne({ where: { plan_date: PLAN_DATE }, transaction });
+      assertEditablePlan(plan);
+
+      const suggestedReplacement = await computeSuggestedReplacement(plan, transaction);
+      return { suggestedReplacement };
+    }
+  );
 }
 
 /**
@@ -258,4 +295,10 @@ async function confirmReplacement({ actorName, actorRole, vehicleId }) {
   });
 }
 
-module.exports = { excludeVehicle, cancelExclusion, confirmReplacement, computeSuggestedReplacement };
+module.exports = {
+  excludeVehicle,
+  cancelExclusion,
+  confirmReplacement,
+  computeSuggestedReplacement,
+  getReplacementSuggestion,
+};

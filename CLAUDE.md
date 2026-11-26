@@ -288,6 +288,7 @@ Only one agent should perform database-mutating verification at a time.
 - Run existing tests to detect regressions.
 - Never claim tests passed without executing them.
 - Clearly report tests that could not be executed.
+- **Seed Data Integrity:** Preserve original CSV-seeded eligibility conditions in acceptance tests. Never globally reset blockers, customs-release flags, or other seeded attributes. Modify only records explicitly required by the test scenario, restore the baseline between tests, and derive expected results from SPEC.md rather than current implementation behavior.
 
 ## 11. Git and Database Safety
 

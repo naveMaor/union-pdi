@@ -401,6 +401,69 @@ Verification:
 - Not yet implemented (Tasks 5-7, out of scope for this round): React
   frontend, deployment, broader QA.
 
+#### Post-Task-4 enhancement — replacement-suggestion recovery
+- Added `GET /api/plan/replacement`, reusing `computeSuggestedReplacement()`
+  from `planEditService.js` unchanged (no duplicated business logic). New
+  `getReplacementSuggestion({actorRole})` in `planEditService.js` enforces
+  PLANNER role and editable status (DRAFT/RETURNED) via the existing
+  `assertPlannerRole`/`assertEditablePlan` helpers, wraps the read in a
+  `db.sequelize.transaction` for the same sequential-query consistency
+  `computeSuggestedReplacement` already requires, and performs no advisory
+  lock (read-only, no plan mutation to serialize against), no write, and no
+  audit event. Returns `{ suggestedReplacement }`, matching the shape already
+  returned inline by exclude/confirm, or `{ suggestedReplacement: null }`
+  when nothing is currently suggested.
+- New `server/src/routes/planReplacementGet.test.js` (6 tests, orchestrator-
+  authored since this was a small, self-contained addition handled directly
+  per the human's instruction not to spawn agents unless necessary): refresh
+  recovery returns the identical suggestion exclude returned and makes no
+  plan_vehicles/audit_events change; a changed-eligibility case (blocking the
+  previously suggested vehicle) returns a different suggestion and a stale
+  confirm is still rejected (`STALE_SUGGESTION`); a genuinely-exhausted case
+  (every eligible vehicle already in the plan, achieved by raising capacity
+  to 262 so all FLEX-eligible candidates are absorbed) returns `null`; role
+  rejection (`403` for SHIPPING/ADMIN); no-plan-yet rejection (`404`
+  `PLAN_NOT_FOUND`); and locked-plan rejection (`409` `PLAN_LOCKED` once
+  submitted to PENDING_SHIPPING).
+- One bug in the test file itself was found and fixed before results were
+  trustworthy, not a defect in the implementation: an initial `beforeEach`
+  blanket-reset all vehicles' `active_blocker` to `NONE`, silently wiping the
+  29 CSV-seeded blockers and producing a wrong suggested vehicle — the same
+  class of mistake Validator caught in its own fixture during Task 3;
+  removed the reset entirely.
+- **Genuine pre-existing defect found on human review, corrected**:
+  `computeSuggestedReplacement()` never checked SPEC §8.4's "room in
+  capacity" (יש מקום בקיבולת) condition — present since Task 3, not
+  introduced by this GET endpoint. A plan already at its `capacity_snapshot`
+  still had a next-FIFO FLEX candidate suggested, because only
+  eligibility/exclusion/HARD-quota were checked. Fixed: the function now
+  returns `null` immediately once current membership reaches
+  `capacity_snapshot`. Because `confirmReplacement()` already recomputes the
+  suggestion fresh under its own locked transaction, this single fix also
+  makes confirmation reject any addition attempted once the plan is full
+  (`409 STALE_SUGGESTION`), with no separate capacity check needed there.
+- `getReplacementSuggestion()` upgraded to `REPEATABLE READ` isolation so
+  every query inside `computeSuggestedReplacement` observes one consistent
+  snapshot of plan state; `confirmReplacement` is unaffected and still
+  revalidates transactionally under the advisory lock before any insert.
+- Both SPEC §14 replacement scenarios re-verified unaffected (exclusion
+  brings membership to 199, one below the 200 capacity_snapshot, so the new
+  capacity check never blocks either case): test 6 (PDI-195 Zeekr/FLEX ->
+  PDI-200) and test 7 (PDI-281 Toyota/HARD -> PDI-107).
+- `planReplacementGet.test.js` now has 8 tests: the 6 above, a restored
+  full-capacity regression test (baseline plan reaches 200/200 on first
+  generation with nothing excluded -> `null`), and a new
+  `POST /plan/replacement/confirm` test confirming any addition attempt is
+  rejected and nothing is inserted once the plan is at capacity. The earlier
+  "genuinely exhausted eligible candidates" test (capacity raised to 262) is
+  retained as a separate scenario — its `null` is due to exhausted
+  eligibility, not capacity.
+- Full suite: 83/83 passing (81 prior + 2 new). `git diff --check` clean.
+  Dev DB confirmed untouched (300 vehicles, 0 plans) and no stray test
+  database left behind.
+- No new dependencies, no schema changes, no duplicated business logic, no
+  additional agents spawned.
+
 Acceptance:
 Invalid actions are rejected server-side.
 

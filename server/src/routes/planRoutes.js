@@ -60,6 +60,11 @@ async function planRoutes(fastify) {
     return planEditService.cancelExclusion({ actorName: actor.name, actorRole: actor.role, vehicleId });
   });
 
+  fastify.get('/plan/replacement', async (request) => {
+    const { actor } = request;
+    return planEditService.getReplacementSuggestion({ actorRole: actor.role });
+  });
+
   fastify.post('/plan/replacement/confirm', async (request) => {
     const { actor } = request;
     const { vehicleId } = request.body || {};
