@@ -180,8 +180,73 @@ async function generatePlan({ actorName, actorRole }) {
   });
 }
 
+/**
+ * Returns the current Plan row for the fixed plan date, or null if none exists
+ * yet. Read-only, no lock — used by the API layer to decide whether to require
+ * an explicit regeneration-confirmation flag before calling generatePlan.
+ */
+async function getCurrentPlan() {
+  return db.Plan.findOne({ where: { plan_date: PLAN_DATE } });
+}
+
+/**
+ * Submits the current plan for shipping approval (SPEC §8.1). Requires PLANNER
+ * role, an editable plan (DRAFT/RETURNED) that is non-empty, and every current
+ * member to still be eligible (customs_released=true AND active_blocker='NONE') —
+ * a blocker added to a plan member after generation blocks submission until the
+ * planner excludes the vehicle or clears the blocker (SPEC §9). Does not check
+ * shipping capacity — that happens at approval time, not here.
+ */
+async function submitForShipping({ actorName, actorRole }) {
+  assertPlannerRole(actorRole);
+
+  return db.sequelize.transaction(async (transaction) => {
+    await acquirePlanLock(transaction);
+
+    const plan = await db.Plan.findOne({ where: { plan_date: PLAN_DATE }, transaction });
+    assertEditablePlan(plan);
+
+    const planVehicles = await db.PlanVehicle.findAll({ where: { plan_id: plan.id }, transaction, raw: true });
+    if (planVehicles.length === 0) {
+      throw new PlanServiceError('EMPTY_PLAN', 'Plan has no vehicles and cannot be submitted');
+    }
+
+    const vehicleIds = planVehicles.map((pv) => pv.vehicle_id);
+    const vehicles = await db.Vehicle.findAll({ where: { vehicle_id: vehicleIds }, transaction, raw: true });
+    const ineligibleVehicleIds = vehicles
+      .filter((vehicle) => !vehicle.customs_released || vehicle.active_blocker !== 'NONE')
+      .map((vehicle) => vehicle.vehicle_id);
+
+    if (ineligibleVehicleIds.length > 0) {
+      throw new PlanServiceError(
+        'INELIGIBLE_VEHICLES_IN_PLAN',
+        `Plan contains ineligible vehicles: ${ineligibleVehicleIds.join(', ')}`
+      );
+    }
+
+    const fromStatus = plan.status;
+    await plan.update({ status: 'PENDING_SHIPPING' }, { transaction });
+
+    await db.AuditEvent.create(
+      {
+        plan_id: plan.id,
+        vehicle_id: null,
+        event_type: 'STATUS_TRANSITION',
+        actor_name: actorName,
+        actor_role: actorRole,
+        payload: { from: fromStatus, to: 'PENDING_SHIPPING' },
+      },
+      { transaction }
+    );
+
+    return { plan: plan.toJSON() };
+  });
+}
+
 module.exports = {
   generatePlan,
+  submitForShipping,
+  getCurrentPlan,
   PlanServiceError,
   PLAN_DATE,
   EDITABLE_STATUSES,

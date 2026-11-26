@@ -217,7 +217,7 @@ Acceptance:
 of docs/assignment/SPEC.md.
 
 ### Task 3 — Planner Operations
-Status: IN PROGRESS
+Status: COMPLETE
 
 #### Step 3.1 — Shared planner validation and locking
 - [x] Shared helper(s) for PLANNER role enforcement and editable-status checks (DRAFT/RETURNED), reused by exclusion/replacement/blocker/regeneration operations
@@ -266,17 +266,47 @@ Verification:
   blockers, submission/regeneration integration beyond what's above, API
   routes, frontend.
 
-#### Step 3.5 — Vehicle blockers (not started yet)
-- [ ] Add/remove blockers, SPEC §9 behavior including warning-only states and submission blocking
+#### Step 3.5 — Vehicle blockers
+- [x] Add/remove blockers, SPEC §9 behavior including warning-only states and submission blocking
 
-#### Step 3.6 — Submission and regeneration integration (not started yet)
-- [ ] Submit-to-shipping transition, regeneration integration with exclusions/blockers
+#### Step 3.6 — Submission and regeneration integration
+- [x] Submit-to-shipping transition, regeneration integration with exclusions/blockers
 
-#### Step 3.7 — Planner REST API (not started yet)
-- [ ] Fastify routes exposing Steps 3.1-3.6 to the frontend
+#### Step 3.7 — Planner REST API
+- [x] Fastify routes exposing Steps 3.1-3.6 to the frontend
 
-#### Step 3.8 — Integration tests and acceptance (not started yet)
-- [ ] End-to-end acceptance tests for all planner operations (SPEC §8-§9)
+#### Step 3.8 — Integration tests and acceptance
+- [x] End-to-end acceptance tests for all planner operations (SPEC §8-§9)
+
+Verification:
+- New files: `server/src/services/blockerService.js` (addBlocker/removeBlocker,
+  no plan-status gating per SPEC §9's last line), `server/src/services/
+  planReadService.js` (plan summary + vehicle list/search/filter/sort/tabs,
+  recomputed from live `plan_vehicles` state, not a cached algorithm run),
+  `server/src/routes/planRoutes.js` (thin Fastify routes under `/api`),
+  `server/src/utils/errorStatusMap.js` (PlanServiceError code -> HTTP
+  status). Changed: `planService.js` (+`submitForShipping`, +`getCurrentPlan`),
+  `app.js` (registers routes + central error handler).
+- Demo role resolution: `x-demo-role` header (PLANNER/SHIPPING/ADMIN),
+  server resolves the fixed actor name from SPEC §4's table — never trusts
+  a client-supplied name (independently confirmed: a bogus actorName in a
+  request body was ignored, the fixed demo name was recorded in the audit
+  trail instead).
+- Regeneration confirmation: `POST /api/plan/generate` returns 409
+  `CONFIRMATION_REQUIRED` if a plan already exists and the body lacks
+  `confirm: true`.
+- SPEC §14 tests 6, 7, 8, 10, 11 all reproduced exactly through the full
+  HTTP layer (`app.inject()`), independently by Builder, Validator, and the
+  orchestrator (three separate runs, three separate throwaway databases):
+  PDI-195->PDI-200, PDI-281->PDI-107, exclusion preserved/cancel-restored
+  across regeneration, a locked (`PENDING_SHIPPING`) plan rejects a direct
+  exclude call (409), and a blocker on an in-plan vehicle surfaces as a
+  warning, blocks submission until resolved, and does not remove the
+  vehicle from the plan.
+- `server/src/routes/planRoutes.test.js` (new, Validator-owned): 18 tests.
+  Full suite: 65/65 passing.
+- Not yet implemented (Task 4, out of scope here): shipping approval,
+  admin settings endpoints, React/frontend.
 
 Acceptance:
 All planner operations satisfy sections 8 and 9.
