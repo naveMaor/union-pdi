@@ -1,0 +1,57 @@
+:root {
+  font: 16px/1.45 system-ui, 'Segoe UI', Arial, sans-serif;
+  color-scheme: light;
+  color: #17293f;
+  background: #f2f5f8;
+  font-synthesis: none;
+
+  --navy: #102a4c;
+  --text-muted: #485a70;
+  --surface: #fff;
+  --border: #d8e1eb;
+  --border-control: #8192a7;
+  --blue: #1d4e88;
+  --blue-tint: #e8f0fa;
+  --green: #185638;
+  --green-tint: #e7f3eb;
+  --red: #8c2432;
+  --red-tint: #fbe9ec;
+  --amber: #783f0b;
+  --amber-tint: #fff0d8;
+  --mono: ui-monospace, Consolas, monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body,
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1,
+h2 {
+  color: var(--navy);
+  line-height: 1.2;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button,
+select,
+summary {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
