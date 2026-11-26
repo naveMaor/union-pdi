@@ -72,6 +72,14 @@ function computeNotInPlanReason(vehicle, context) {
   if (vehicle.active_blocker !== 'NONE') return 'ACTIVE_BLOCKER';
   if (context.excludedVehicleIds.has(vehicle.vehicle_id)) return 'MANUALLY_EXCLUDED';
 
+  if (!context.hasPlan) {
+    // No plan exists yet — HARD quota / capacity are properties of a
+    // generated plan and don't apply. Returning a quota/capacity reason here
+    // would be fabricated, not real: this vehicle is simply eligible with
+    // nothing yet decided for it.
+    return null;
+  }
+
   const quota = context.brandQuotas[vehicle.brand];
   if (quota && quota.quota_type === 'HARD' && (context.brandCounts[vehicle.brand] || 0) >= quota.quota_target) {
     return 'HARD_QUOTA_EXCEEDED';
@@ -112,6 +120,7 @@ async function listVehicles({ tab = 'all', search, brand, sourceLocation, sortBy
 
   let planVehicleIds = new Set();
   let excludedVehicleIds = new Set();
+  let exclusionsByVehicleId = new Map();
   let brandCounts = {};
   let brandQuotas = {};
   let capacitySnapshot = 0;
@@ -125,6 +134,18 @@ async function listVehicles({ tab = 'all', search, brand, sourceLocation, sortBy
       raw: true,
     });
     excludedVehicleIds = new Set(activeExclusions.map((row) => row.vehicle_id));
+    exclusionsByVehicleId = new Map(
+      activeExclusions.map((row) => [
+        row.vehicle_id,
+        {
+          reason_code: row.reason_code,
+          note: row.note,
+          excluded_by_name: row.excluded_by_name,
+          excluded_by_role: row.excluded_by_role,
+          excluded_at: row.excluded_at,
+        },
+      ])
+    );
 
     const inPlanVehicles = await db.Vehicle.findAll({ where: { vehicle_id: Array.from(planVehicleIds) }, raw: true });
     for (const vehicle of inPlanVehicles) {
@@ -135,7 +156,14 @@ async function listVehicles({ tab = 'all', search, brand, sourceLocation, sortBy
     capacitySnapshot = plan.capacity_snapshot;
   }
 
-  const context = { excludedVehicleIds, brandCounts, brandQuotas, capacitySnapshot, selectedCount: planVehicleIds.size };
+  const context = {
+    excludedVehicleIds,
+    brandCounts,
+    brandQuotas,
+    capacitySnapshot,
+    selectedCount: planVehicleIds.size,
+    hasPlan: Boolean(plan),
+  };
 
   const annotated = vehicles.map((vehicle) => {
     const inPlan = planVehicleIds.has(vehicle.vehicle_id);
@@ -143,15 +171,15 @@ async function listVehicles({ tab = 'all', search, brand, sourceLocation, sortBy
       ...vehicle,
       inPlan,
       reason: inPlan ? null : computeNotInPlanReason(vehicle, context),
+      exclusion: exclusionsByVehicleId.get(vehicle.vehicle_id) || null,
     };
   });
 
   const filtered = annotated.filter((vehicle) => {
     if (tab === 'in_plan') return vehicle.inPlan;
-    if (tab === 'eligible_not_in_plan') {
-      return !vehicle.inPlan && vehicle.customs_released && vehicle.active_blocker === 'NONE';
-    }
-    if (tab === 'ineligible') return !vehicle.customs_released || vehicle.active_blocker !== 'NONE';
+    const eligible = vehicle.customs_released && vehicle.active_blocker === 'NONE' && !vehicle.exclusion;
+    if (tab === 'eligible_not_in_plan') return eligible && !vehicle.inPlan;
+    if (tab === 'ineligible') return !eligible;
     return true; // 'all'
   });
 

@@ -25,11 +25,28 @@ function buildApp() {
   app.register(settingsRoutes, { prefix: '/api' });
 
   app.setErrorHandler((error, request, reply) => {
-    const status = ERROR_STATUS_MAP[error.code];
-    if (status) {
-      reply.code(status).send({ error: error.code, message: error.message });
+    const mappedStatus = ERROR_STATUS_MAP[error.code];
+    if (mappedStatus) {
+      reply.code(mappedStatus).send({ error: error.code, message: error.message });
       return;
     }
+
+    // Fastify's own framework-level errors (malformed JSON body, routing,
+    // validation) carry a FST_ERR_* code and a legitimate 4xx statusCode —
+    // that's the recognized signal that it's safe to report back verbatim,
+    // as opposed to an arbitrary unmapped error that might be a real bug.
+    const isFastifyClientError =
+      typeof error.code === 'string' &&
+      error.code.startsWith('FST_ERR_') &&
+      Number.isInteger(error.statusCode) &&
+      error.statusCode >= 400 &&
+      error.statusCode < 500;
+
+    if (isFastifyClientError) {
+      reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      return;
+    }
+
     request.log.error(error);
     reply.code(500).send({ error: 'INTERNAL_ERROR', message: 'Unexpected server error' });
   });
