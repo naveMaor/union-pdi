@@ -134,14 +134,52 @@ Verification:
 - Full suite: `npm test` → 16/16 passing (12 from Step 1.5 + 4 new).
 
 ### Task 2 — Recommendation Algorithm
-Status: NOT STARTED
+Status: IN PROGRESS
 
-- Implement eligibility rules
-- Implement FIFO sorting
-- Implement HARD and FLEX quotas
-- Apply daily capacity
-- Persist generated plans
-- Write algorithm tests
+#### Step 2.1 — Eligibility and exclusion reasons
+- [x] Implement eligibility rule (customs_released=true AND active_blocker=NONE AND not manually excluded for the plan date)
+- [x] Produce a specific reason for every non-selected vehicle (SPEC §5.1 examples: active blocker, not customs-released, hard quota exhausted, over capacity, manually excluded)
+
+#### Step 2.2 — Deterministic FIFO sorting
+- [x] Sort eligible vehicles by envelope_date ascending, tie-broken by vehicle_id ascending (SPEC §6/§7)
+
+#### Step 2.3 — Single-pass recommendation algorithm, quotas, capacity and summaries
+- [x] Single pass over the sorted list (no reservation/backtracking)
+- [x] HARD brand quotas as a ceiling (skip and continue when exhausted)
+- [x] FLEX brand quotas allowed to be exceeded, with an over-quota indicator
+- [x] Stop at daily capacity or when candidates are exhausted
+- [x] Return selected vehicles, non-selection reasons, brand quota utilization (incl. FLEX overage), and source_location counts
+- [x] Never special-case customer_segment, population, or requested_delivery_date
+
+#### Step 2.4 — Algorithm unit tests
+- [x] Unit tests against the real CSV dataset, covering SPEC §14 scenarios 2-5, FIFO tie-breaking, manual exclusions, zero/exhausted HARD quotas, FLEX overflow, insufficient eligible candidates, and independence from shipping capacity and display-only fields
+
+Verification:
+- `server/src/services/recommendation.js` (pure CommonJS, no DB/HTTP) exports
+  `generateRecommendation({ vehicles, excludedVehicleIds, brandQuotas,
+  dailyCapacity })`.
+- Orchestrator independently reran the module against the raw CSV: SPEC §14
+  tests 2-5 reproduced exactly (262/38 eligibility; 200-cap: Toyota 55,
+  Lexus 36, GAC 22, Geely 44 (+12), Zeekr 43 (+15); source counts נמל חיפה
+  52/נמל אשדוד 51/בונדד אשדוד 49/בונדד חיפה 48; 195-cap: Toyota 55, Lexus
+  36, GAC 20, Geely 42, Zeekr 42).
+- `server/src/services/recommendation.test.js` (new, Validator-owned): 10
+  unit tests (FIFO tie-break, manual exclusion, zero/exhausted HARD quota,
+  FLEX overflow, insufficient candidates, display-field/shipping-capacity
+  independence, `dailyCapacity: 0` regression). Full suite: 26/26 passing.
+- Edge case found and fixed: `dailyCapacity <= 0` originally selected 1
+  vehicle instead of 0 (capacity-reached flag set one vehicle too late).
+  Not reachable via the real app (Step 1.5's `settings.daily_capacity >= 1`
+  CHECK constraint), but fixed anyway (direct `selected.length >=
+  dailyCapacity` check per iteration) since it was a one-line, no-risk
+  correction. Reverified: SPEC §14 scenarios still reproduce exactly, no
+  regressions.
+
+#### Step 2.5 — Recommendation service and transactional persistence (not started yet)
+- [ ] Wire the pure algorithm into a service that reads current settings/quotas/vehicles/exclusions and persists a Plan + PlanVehicles transactionally
+
+#### Step 2.6 — Integration tests and acceptance (not started yet)
+- [ ] End-to-end integration tests against PostgreSQL covering SPEC §14 acceptance scenarios
 
 Acceptance:
 200 selected vehicles, matching section 14
