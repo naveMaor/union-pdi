@@ -20,6 +20,30 @@ function assertPlannerRole(actorRole) {
   }
 }
 
+function assertShippingRole(actorRole) {
+  if (actorRole !== 'SHIPPING') {
+    throw new PlanServiceError('FORBIDDEN_ROLE', `Role ${actorRole} is not authorized to perform this action`);
+  }
+}
+
+function assertAdminRole(actorRole) {
+  if (actorRole !== 'ADMIN') {
+    throw new PlanServiceError('FORBIDDEN_ROLE', `Role ${actorRole} is not authorized to perform this action`);
+  }
+}
+
+function assertPendingShipping(plan) {
+  if (!plan) {
+    throw new PlanServiceError('PLAN_NOT_FOUND', `No plan exists yet for ${PLAN_DATE}`);
+  }
+  if (plan.status !== 'PENDING_SHIPPING') {
+    throw new PlanServiceError(
+      'PLAN_NOT_PENDING_SHIPPING',
+      `Plan for ${PLAN_DATE} is ${plan.status}, not PENDING_SHIPPING`
+    );
+  }
+}
+
 // Serializes concurrent operations against this plan date, including the race
 // between two callers that both see no existing plan row yet.
 async function acquirePlanLock(transaction) {
@@ -243,14 +267,115 @@ async function submitForShipping({ actorName, actorRole }) {
   });
 }
 
+/**
+ * Approves the plan for shipping (SPEC §8.1, §5.2). SHIPPING role only, only
+ * from PENDING_SHIPPING. Compares actual per-source-location vehicle counts
+ * against the CURRENT shipping_capacities settings — read live at approval
+ * time, never from a plan snapshot (SPEC §5.3's "approval uses the current
+ * shipping capacity settings"). Rejects server-side if any source is over
+ * capacity; the UI cannot bypass this.
+ */
+async function approveForShipping({ actorName, actorRole }) {
+  assertShippingRole(actorRole);
+
+  return db.sequelize.transaction(async (transaction) => {
+    await acquirePlanLock(transaction);
+
+    const plan = await db.Plan.findOne({ where: { plan_date: PLAN_DATE }, transaction });
+    assertPendingShipping(plan);
+
+    const planVehicles = await db.PlanVehicle.findAll({ where: { plan_id: plan.id }, transaction, raw: true });
+    const vehicleIds = planVehicles.map((pv) => pv.vehicle_id);
+    const vehicles = await db.Vehicle.findAll({ where: { vehicle_id: vehicleIds }, transaction, raw: true });
+
+    const countsBySource = {};
+    for (const vehicle of vehicles) {
+      countsBySource[vehicle.source_location] = (countsBySource[vehicle.source_location] || 0) + 1;
+    }
+
+    const shippingCapacities = await db.ShippingCapacity.findAll({ transaction, raw: true });
+    const violations = [];
+    for (const capacityRow of shippingCapacities) {
+      const count = countsBySource[capacityRow.source_location] || 0;
+      if (count > capacityRow.capacity) {
+        violations.push({ source_location: capacityRow.source_location, count, capacity: capacityRow.capacity });
+      }
+    }
+
+    if (violations.length > 0) {
+      throw new PlanServiceError(
+        'SHIPPING_CAPACITY_EXCEEDED',
+        `Shipping capacity exceeded for: ${violations.map((v) => `${v.source_location} (${v.count}/${v.capacity})`).join(', ')}`
+      );
+    }
+
+    const fromStatus = plan.status;
+    await plan.update({ status: 'APPROVED' }, { transaction });
+
+    await db.AuditEvent.create(
+      {
+        plan_id: plan.id,
+        vehicle_id: null,
+        event_type: 'STATUS_TRANSITION',
+        actor_name: actorName,
+        actor_role: actorRole,
+        payload: { from: fromStatus, to: 'APPROVED' },
+      },
+      { transaction }
+    );
+
+    return { plan: plan.toJSON() };
+  });
+}
+
+/**
+ * Returns the plan to the planner for correction (SPEC §8.1). SHIPPING role
+ * only, only from PENDING_SHIPPING, back to RETURNED. A nonblank comment is
+ * required and stored in plans.returned_note for the planner to see.
+ */
+async function returnToPlanner({ actorName, actorRole, comment }) {
+  assertShippingRole(actorRole);
+  if (!comment || !comment.trim()) {
+    throw new PlanServiceError('COMMENT_REQUIRED', 'A nonblank comment is required to return a plan');
+  }
+
+  return db.sequelize.transaction(async (transaction) => {
+    await acquirePlanLock(transaction);
+
+    const plan = await db.Plan.findOne({ where: { plan_date: PLAN_DATE }, transaction });
+    assertPendingShipping(plan);
+
+    const fromStatus = plan.status;
+    await plan.update({ status: 'RETURNED', returned_note: comment }, { transaction });
+
+    await db.AuditEvent.create(
+      {
+        plan_id: plan.id,
+        vehicle_id: null,
+        event_type: 'STATUS_TRANSITION',
+        actor_name: actorName,
+        actor_role: actorRole,
+        payload: { from: fromStatus, to: 'RETURNED', comment },
+      },
+      { transaction }
+    );
+
+    return { plan: plan.toJSON() };
+  });
+}
+
 module.exports = {
   generatePlan,
   submitForShipping,
+  approveForShipping,
+  returnToPlanner,
   getCurrentPlan,
   PlanServiceError,
   PLAN_DATE,
   EDITABLE_STATUSES,
   assertPlannerRole,
+  assertShippingRole,
+  assertAdminRole,
   assertEditablePlan,
   acquirePlanLock,
 };

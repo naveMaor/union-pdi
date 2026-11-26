@@ -312,14 +312,94 @@ Acceptance:
 All planner operations satisfy sections 8 and 9.
 
 ### Task 4 — Shipping and Administration
-Status: NOT STARTED
+Status: COMPLETE
 
-- Implement plan status transitions
-- Implement role authorization
-- Shipping approval and return
-- Shipping capacity checks
-- Administrative settings
-- Enforce plan locking
+#### Step 4.1 — Shipping approval
+- [x] SHIPPING-only approval from PENDING_SHIPPING, checking actual per-source counts against current shipping capacities (SPEC §5.2, §8.1)
+- [x] Approval blocked server-side if any source exceeds its capacity
+- [x] APPROVED is final: no further edits or transitions
+
+#### Step 4.2 — Return for correction
+- [x] SHIPPING-only return from PENDING_SHIPPING back to RETURNED, with a required nonblank comment (SPEC §5.2, §8.1)
+- [x] Return without a comment is rejected server-side
+- [x] Returned plan is editable again by the planner; return comment is visible
+
+#### Step 4.3 — Administrative settings
+- [x] ADMIN-only updates to daily capacity, brand quotas/types, shipping capacities per source, and envelope warning thresholds (SPEC §5.3)
+- [x] Validate integers, minimums (capacity >= 1, others >= 0) and allowed quota types
+- [x] Parameter changes never modify an existing plan; they only affect the next recommendation run
+
+#### Step 4.4 — REST API
+- [x] Fastify routes for shipping approval/return and admin settings read/update, reusing existing demo-actor resolution and error handling
+
+#### Step 4.5 — Integration tests
+- [x] Integration tests against real PostgreSQL in isolated test databases covering SPEC §14 test 9 and relevant edge cases
+
+#### Step 4.6 — Backend acceptance
+- [x] All of SPEC §§4, 5.2, 5.3, 8.1, 9 satisfied end-to-end through the HTTP API, with full regression suite passing
+
+Verification:
+- New files: `server/src/services/settingsService.js` (getSettings/updateSettings,
+  strict integer/range/enum validation, SETTINGS_CHANGED audit event with
+  before/after diff), `server/src/routes/settingsRoutes.js` (GET open to any
+  valid demo role, PUT ADMIN-only), `server/src/routes/demoRoleHook.js`
+  (factored out of planRoutes.js so settingsRoutes.js reuses the same
+  actor-resolution logic, no duplication).
+- Changed: `server/src/services/planService.js` (+`assertShippingRole`,
+  +`assertAdminRole`, +`assertPendingShipping`, +`approveForShipping`,
+  +`returnToPlanner`), `server/src/routes/planRoutes.js` (+`/plan/approve`,
+  +`/plan/return`), `server/src/utils/errorStatusMap.js`
+  (+`PLAN_NOT_PENDING_SHIPPING`, +`SHIPPING_CAPACITY_EXCEEDED`,
+  +`COMMENT_REQUIRED`, +`INVALID_SETTING_VALUE`), `server/src/app.js`
+  (registers settingsRoutes).
+- Shipping-capacity approval check reads live `shipping_capacities` rows
+  inside the transaction — deliberately not the plan's frozen
+  `capacity_snapshot`/`brand_quotas_snapshot`, since SPEC §5.3 explicitly
+  requires approval to use current capacity settings, unlike every other
+  snapshot-based rule in the system.
+- APPROVED finality required no new status-machine code: it is already
+  covered by the existing `EDITABLE_STATUSES`/`assertEditablePlan` pattern
+  shared by generation, submission and all of planEditService.js. Verified,
+  not assumed, by firing every mutating endpoint (exclude, cancel-exclusion,
+  confirm-replacement, regenerate, submit, re-approve, return) against an
+  APPROVED plan and confirming each is rejected.
+- Blocker add/remove confirmed to remain warning-only and status-unrestricted
+  even on an APPROVED plan's member — membership and status unchanged.
+- One design finding from orchestrator review, corrected before acceptance:
+  GET /api/settings was initially ADMIN-only. Since planReadService.js never
+  exposes the envelope warning thresholds or shipping capacities anywhere
+  else, and SPEC §5.1/§5.2 require the planner and shipping screens to
+  display values derived from them, GET was loosened to accept any valid
+  demo role; PUT remains ADMIN-only. Validator re-confirmed after the change.
+- Bug found and fixed in Builder's own self-test cycle (not by Validator or
+  orchestrator): `updateSettings`'s final read used a different pooled
+  connection than the one holding the uncommitted write inside the
+  transaction, returning stale pre-commit data. Fixed by threading the
+  transaction through to the read. Confirmed fixed by rerunning the full
+  self-test from a fresh database.
+- SPEC §14 test 9 reproduced exactly, independently by Builder, Validator and
+  the orchestrator (three separate throwaway databases): shipping capacity
+  of נמל חיפה set to 45 against 52 planned vehicles there -> approval
+  rejected 409 `SHIPPING_CAPACITY_EXCEEDED`; return without a comment ->
+  400 `COMMENT_REQUIRED`; return with a comment -> 200, status `RETURNED`,
+  note visible via `GET /api/plan`.
+- Concurrency: two simultaneous approval calls on the same plan correctly
+  serialize via the existing plan-date advisory lock — exactly one
+  `APPROVED` row and one matching audit event, verified directly against
+  Postgres rows.
+- Non-retroactivity confirmed end-to-end: a settings change leaves an
+  existing plan's snapshot and membership untouched; a subsequent
+  regeneration picks up the new values (reproducing SPEC §14 test 5's exact
+  195-capacity numbers after changing only the capacity setting).
+- `server/src/routes/shippingSettingsRoutes.test.js` (new, Validator-owned):
+  10 tests. Full suite: 75/75 passing.
+- Orchestrator independently reran the full suite and a separate end-to-end
+  script against a disposable database (migrated/seeded fresh, dropped
+  after), reproducing SPEC §14 test 9, role-gating on both settings and
+  approval/return, APPROVED finality across every mutating endpoint, and the
+  blocker-as-warning behavior directly.
+- Not yet implemented (Tasks 5-7, out of scope for this round): React
+  frontend, deployment, broader QA.
 
 Acceptance:
 Invalid actions are rejected server-side.

@@ -2,6 +2,7 @@
 const Fastify = require('fastify');
 const cors = require('@fastify/cors');
 const planRoutes = require('./routes/planRoutes');
+const settingsRoutes = require('./routes/settingsRoutes');
 const { ERROR_STATUS_MAP } = require('./utils/errorStatusMap');
 
 function buildApp() {
@@ -21,6 +22,7 @@ function buildApp() {
   });
 
   app.register(planRoutes, { prefix: '/api' });
+  app.register(settingsRoutes, { prefix: '/api' });
 
   app.setErrorHandler((error, request, reply) => {
     const status = ERROR_STATUS_MAP[error.code];

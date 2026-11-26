@@ -4,28 +4,10 @@ const planService = require('../services/planService');
 const planEditService = require('../services/planEditService');
 const blockerService = require('../services/blockerService');
 const planReadService = require('../services/planReadService');
-
-// Fixed demo users (SPEC §4) — role simulation only, not authentication. The
-// server resolves the actor NAME from the role code itself; a client can never
-// supply its own name.
-const DEMO_USERS = {
-  PLANNER: 'מיכל לוי',
-  SHIPPING: 'יוסי כהן',
-  ADMIN: 'רונית שמש',
-};
+const { demoRoleHook } = require('./demoRoleHook');
 
 async function planRoutes(fastify) {
-  fastify.addHook('preHandler', async (request, reply) => {
-    const role = request.headers['x-demo-role'];
-    if (!role || !DEMO_USERS[role]) {
-      reply.code(400).send({
-        error: 'INVALID_DEMO_ROLE',
-        message: 'x-demo-role header must be one of PLANNER, SHIPPING, ADMIN',
-      });
-      return reply;
-    }
-    request.actor = { role, name: DEMO_USERS[role] };
-  });
+  fastify.addHook('preHandler', demoRoleHook);
 
   fastify.post('/plan/generate', async (request, reply) => {
     const { actor } = request;
@@ -100,6 +82,17 @@ async function planRoutes(fastify) {
   fastify.post('/plan/submit', async (request) => {
     const { actor } = request;
     return planService.submitForShipping({ actorName: actor.name, actorRole: actor.role });
+  });
+
+  fastify.post('/plan/approve', async (request) => {
+    const { actor } = request;
+    return planService.approveForShipping({ actorName: actor.name, actorRole: actor.role });
+  });
+
+  fastify.post('/plan/return', async (request) => {
+    const { actor } = request;
+    const { comment } = request.body || {};
+    return planService.returnToPlanner({ actorName: actor.name, actorRole: actor.role, comment });
   });
 }
 
