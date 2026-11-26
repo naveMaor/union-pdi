@@ -134,7 +134,7 @@ Verification:
 - Full suite: `npm test` → 16/16 passing (12 from Step 1.5 + 4 new).
 
 ### Task 2 — Recommendation Algorithm
-Status: IN PROGRESS
+Status: COMPLETE
 
 #### Step 2.1 — Eligibility and exclusion reasons
 - [x] Implement eligibility rule (customs_released=true AND active_blocker=NONE AND not manually excluded for the plan date)
@@ -175,11 +175,42 @@ Verification:
   correction. Reverified: SPEC §14 scenarios still reproduce exactly, no
   regressions.
 
-#### Step 2.5 — Recommendation service and transactional persistence (not started yet)
-- [ ] Wire the pure algorithm into a service that reads current settings/quotas/vehicles/exclusions and persists a Plan + PlanVehicles transactionally
+#### Step 2.5 — Recommendation service and transactional persistence
+- [x] Wire the pure algorithm into a service that reads current settings/quotas/vehicles/exclusions and persists a Plan + PlanVehicles transactionally
 
-#### Step 2.6 — Integration tests and acceptance (not started yet)
-- [ ] End-to-end integration tests against PostgreSQL covering SPEC §14 acceptance scenarios
+#### Step 2.6 — Integration tests and acceptance
+- [x] End-to-end integration tests against PostgreSQL covering SPEC §14 acceptance scenarios
+
+Verification:
+- `server/src/services/planService.js` (new): `generatePlan({ actorName,
+  actorRole })`, fixed `PLAN_DATE='2026-11-23'`, enforces PLANNER role
+  (`PlanServiceError('FORBIDDEN_ROLE')`), creates DRAFT on first run,
+  regenerates only in DRAFT/RETURNED (`PlanServiceError('PLAN_LOCKED')`
+  otherwise, status preserved), clears both ALGORITHM and MANUAL
+  `plan_vehicles` on regen and reinserts the fresh ALGORITHM selection,
+  leaves `manual_exclusions` untouched, writes `capacity_snapshot` and
+  `brand_quotas_snapshot` (quota_target + quota_type) every run, records
+  `STATUS_TRANSITION` (first run) and `RECOMMENDATION_RUN` audit events,
+  and serializes concurrent calls with `pg_advisory_xact_lock`.
+- Bug found and fixed by Builder during self-test: concurrent `Promise.all`
+  reads on a shared transaction connection (pg does not support concurrent
+  queries on one connection) — changed to sequential awaits.
+- `server/src/services/planService.test.js` (new, Validator-owned): 9
+  tests against real PostgreSQL in an isolated, PID-suffixed test database,
+  covering SPEC §14 tests 3-5 end-to-end, regeneration semantics (exclusion
+  preservation, manual-addition reset, one-plan-per-date), snapshot
+  immutability, status/role rejection, shipping-capacity independence,
+  concurrency, and transaction rollback on forced failure.
+- Orchestrator independently reran the full suite (35/35 passing) and ran
+  an independent end-to-end check in its own throwaway database: SPEC §14
+  baseline reproduced exactly, exclusion preserved and manual addition
+  cleared on regen, one Plan row across two generations, role and
+  lock rejection both verified. Dev DB confirmed untouched (0 plans, 0
+  audit_events, 300 vehicles unchanged) and no stray test database left
+  behind.
+- Not yet implemented (explicitly out of scope for 2.5-2.6): replacement
+  suggestions (§8.4), manual exclude/add/blocker operations, shipping
+  approval, API routes, frontend.
 
 Acceptance:
 200 selected vehicles, matching section 14
