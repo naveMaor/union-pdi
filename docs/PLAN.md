@@ -468,14 +468,241 @@ Acceptance:
 Invalid actions are rejected server-side.
 
 ### Task 5 — Planner Frontend
-Status: NOT STARTED
+Status: IN PROGRESS
 
-- React RTL layout
-- Vehicle table
-- Search and filters
-- Planning summaries
-- Planner actions and dialogs
-- Submission workflow
+Batch A (Steps 5.1–5.4) is complete. The human approved Design B and the
+three browser captures. Batch B (Steps 5.5–5.9) is pending.
+
+Stack: React + Vite, plain JavaScript (no TypeScript), plain CSS (no
+component library), native `fetch` via a centralized API client. Hebrew RTL
+throughout; technical identifiers (vehicle_id, demo_vin) rendered LTR.
+`client/.env` holds `VITE_API_BASE_URL` (default `http://localhost:3001/api`).
+Dev server fixed to port 5173 with `strictPort`.
+
+#### Step 5.1 — Contract and scaffold verification
+- [x] Verify HEAD/git status, scaffold `client/` with Vite + React, verify
+  Node 24 compatibility, retain lockfile, no engine warnings
+- [x] Document exact API contracts (routes, roles, request/response shapes,
+  field casing, error codes, status values) from the real backend source
+- [x] Resolve targeted contract gaps: tab values/default/count semantics,
+  exclusion-metadata read exposure, no-plan tab behavior
+
+#### Step 5.2 — RTL foundation and API client
+- [x] Hebrew RTL shell (`dir="rtl"`, `lang="he"`), fixed plan date display,
+  role switcher (PLANNER only is functional this round; SHIPPING/ADMIN
+  reserved for Task 6)
+- [x] Centralized `fetch` API client: injects `x-demo-role`, parses
+  `{error, message}` bodies, configurable base URL
+
+#### Step 5.3 — Vehicle table, search and filters
+- [x] Table of vehicles with the four tabs (`all`/`in_plan`/
+  `eligible_not_in_plan`/`ineligible`), search (vehicle_id/demo_vin),
+  brand/source filters, envelope-date sort
+- [x] Global SPEC-aligned stat counts (300/262/38/200) kept visually
+  distinct from the current filtered table count
+- [x] Guard against stale filter responses overriding newer ones (request
+  sequencing/abort)
+
+#### Step 5.4 — Planning summaries and status
+- [x] Plan status, returned note, brand quota utilization (with FLEX
+  overage), source-location counts against live shipping capacities,
+  blocker warnings, capacity (selected/target)
+- [x] Explicit `{plan: null}` (no-plan-yet) state handled distinctly from a
+  generated plan
+- [x] Loading/error/empty states for every fetch; no fabricated data and no
+  nonfunctional action buttons presented as working
+
+Verification:
+- Contract gaps found during Step 5.1 verification (orchestrator, directly
+  against real backend source and a disposable database, no agents
+  spawned): (1) `GET /vehicles`'s `count` is always the filtered-set count,
+  never a global count — confirmed `tab=all&brand=Toyota` returns `count:
+  90`, not 300; the frontend must derive SPEC-aligned global counts from a
+  separate unfiltered `tab=all` fetch, never from the currently filtered
+  response. (2) Persisted exclusion `reason_code`/`note`/actor/timestamp are
+  returned only once, inline in the `POST /exclude` response, and are never
+  retrievable again from any GET endpoint — confirmed directly: after
+  excluding PDI-195 with `SECURITY_FORCES`, `GET /vehicles` shows only
+  `reason: 'MANUALLY_EXCLUDED'` with no trace of the stored reason code, and
+  `GET /plan` has no exclusions field at all. Flagged as a genuine backend
+  gap against SPEC §5.1/§14 test 12 (a second browser window or a refresh
+  cannot show *why* a vehicle was excluded); not fixed this round pending a
+  human decision, per explicit instruction not to modify the backend
+  without approval. (3) Before any plan exists, `capacitySnapshot` defaults
+  to 0, so every eligible vehicle is misleadingly reported with `reason:
+  'OVER_CAPACITY'` instead of reflecting that there is simply no plan yet —
+  confirmed directly (all 262 eligible vehicles affected pre-generation).
+  Also not fixed this round; the frontend must special-case `plan === null`
+  and never surface this reason text verbatim.
+- `client/` scaffolded via `npm create vite@latest . -- --template react`;
+  `@types/react`/`@types/react-dom` removed (unneeded for a plain-JS
+  project). `npm install` succeeded with 0 vulnerabilities and no Node-24
+  engine warnings; `package-lock.json` retained. Vite dev server verified to
+  start on port 5173 with `strictPort` and respond 200.
+- **Batch A (Steps 5.2-5.4) build**: new `client/src/api/client.js` (centralized
+  fetch wrapper), `client/src/constants.js`, `client/src/hooks/{useApiResource,
+  useApi}.js`, `client/src/components/{StatusMessage,StatTiles,
+  PlanSummaryPanel,VehicleFilters,VehicleTable}.jsx`, `client/src/screens/
+  {PlannerScreen,ComingSoonScreen}.jsx`. Changed: `client/index.html`
+  (`lang="he" dir="rtl"`), `client/src/App.jsx` (role switcher, fixed plan-date
+  banner), `client/src/{App,index}.css`.
+- Global stat tiles (300/262/38/N-in-plan) are derived client-side from one
+  unfiltered `tab=all` fetch (`useAllVehicles`), never from the currently
+  filtered table response's own `count` — independently confirmed by the
+  orchestrator and Validator that `GET /vehicles?tab=all&brand=Toyota`
+  returns `count: 90`, not 300, so this separation is load-bearing, not
+  cosmetic.
+- Plan's frozen `capacity_snapshot`/`brand_quotas_snapshot` (from `GET /plan`)
+  and live `shippingCapacities`/envelope thresholds (from `GET /settings`)
+  are kept as two separate data sources in `PlanSummaryPanel`, never
+  conflated, per SPEC §5.3.
+- `{plan: null}` renders a distinct "not generated yet" message, and the
+  confirmed pre-generation `OVER_CAPACITY` backend quirk (Step 5.1 finding)
+  is suppressed client-side via a `hasPlan` flag rather than displayed
+  verbatim.
+- Stale-response guarding in `useApiResource`: AbortController per request
+  plus a request-id check, so neither an aborted nor a slow-but-unaborted
+  older response can overwrite a newer one.
+- **Defect found during Validator's live HTTP testing, fixed**: the API
+  client unconditionally sent `Content-Type: application/json` even for
+  no-body requests, which Fastify rejects (`FST_ERR_CTP_EMPTY_JSON_BODY`)
+  and the backend's current error handler surfaces as a misleading `500`
+  instead of `400`/`404`. Didn't affect this round's read-only UI (no
+  action buttons exist yet) but would have broken every no-body mutating
+  call in Batch B. Fixed client-side only (`Content-Type` set only when a
+  body is actually present) per explicit orchestrator instruction to keep
+  this round's fix within `client/` scope. Independently reproduced both the
+  bug and the fix by the orchestrator directly against a disposable
+  database: a no-body `POST /plan/submit` without the JSON header returned
+  `404 PLAN_NOT_FOUND` with the corrected client behavior. The old header
+  behavior produced a 500. The backend error handler was fixed in the
+  integration correction batch below.
+- `npm run build` and `npm run lint` (oxlint) both verified clean by the
+  orchestrator independently (0 errors; 2 pre-existing benign warnings in
+  the generic fetch hook, a standard pattern for this kind of hook, not a
+  bug).
+- Orchestrator independently reran the full backend regression suite
+  (83/83 passing) and a separate end-to-end script against a disposable
+  database (migrated/seeded fresh, dropped after), reproducing SPEC §14
+  tests 2/3/4's exact numbers (38 ineligible; Toyota 55/Lexus 36/GAC
+  22/Geely 44+12/Zeekr 43+15; נמל חיפה 52/נמל אשדוד 51/בונדד אשדוד
+  49/בונדד חיפה 48) live through the real HTTP layer, and confirmed the dev
+  DB remained untouched throughout (300 vehicles, 0 plans) with no stray
+  test database left behind.
+- Remaining limitation: no automated frontend test suite exists yet
+  (Vitest/RTL would be a new dependency requiring approval); verification
+  this round relied on direct code review, `build`/`lint`, and live
+  manual/scripted HTTP integration checks against the real backend rather
+  than component-level automated tests.
+- Local preview: `cd client && npm run dev` (serves on `http://localhost:5173`
+  with `strictPort`), with the backend running separately
+  (`cd server && npm run dev`, listening on `127.0.0.1:3001`) and a plan
+  already generated in the target database for the "generated plan" view
+  (otherwise the UI correctly shows the no-plan empty state).
+- Not yet implemented (Steps 5.5-5.9, Task 6, deployment): recommendation
+  generation action, exclusions/replacement UI, blocker management UI,
+  submission UI, shipping/admin frontends.
+
+#### Integration correction batch (post-Batch-A, pre-Batch-B)
+Human-approved targeted fix of 5 confirmed items, touching both `server/`
+and `client/` (no new dependencies, no schema/migration changes, no new
+endpoints):
+1. `GET /api/vehicles` now returns persisted active-exclusion metadata per
+   vehicle: `exclusion: {reason_code, note, excluded_by_name,
+   excluded_by_role, excluded_at} | null`, built from the single
+   `activeExclusions` query `listVehicles()` already ran (no N+1 added).
+2. Fixed the misleading pre-generation `OVER_CAPACITY` reason:
+   `computeNotInPlanReason` now returns `null` (not a fabricated code) once
+   customs/blocker/exclusion checks pass and no plan exists yet — HARD-quota
+   and capacity checks are skipped entirely pre-generation since they don't
+   apply without a plan.
+3. Fixed `app.js`'s global error handler to add a middle tier: domain
+   `PlanServiceError` codes still map via the unchanged `ERROR_STATUS_MAP`;
+   a genuine Fastify framework-level error (`error.code` starts with
+   `FST_ERR_` and carries its own legitimate 4xx `error.statusCode`) now
+   passes through as-is instead of collapsing to 500; anything else still
+   sanitizes to the generic `500 INTERNAL_ERROR` with no leaked internals.
+4. Frontend reconciled: `VehicleTable.jsx` renders the real `reason` (via
+   `REASON_LABELS`) or a neutral "טרם תוכנן" chip only when `reason` is
+   actually `null`; a new collapsible exclusion-detail panel displays the
+   persisted exclusion metadata per excluded row.
+5. `StatTiles.jsx`'s `isEligible()` now also requires no active `exclusion`
+   (SPEC §7 step 1's full eligibility definition), independent of plan
+   membership (`inPlan`), which remains a separate, untouched count.
+6. Lint: both `useApiResource.js` warnings were genuine false positives
+   given the hook's intentional design; suppressed using oxlint's actual
+   disable-comment syntax (`oxlint-disable-next-line`, confirmed to differ
+   from and not be satisfied by ESLint's own syntax — verified by actually
+   re-running lint after adding each comment, not assumed), each with a
+   one-line justification. `npm run lint`: 0 warnings, 0 errors.
+- **New defect found during this round's own review** (Validator, confirmed
+  independently by the orchestrator via source read): the new
+  exclusion-detail panel initially mislabeled SPEC §8.3's 6 manual-exclusion
+  reason codes using `REASON_LABELS` (a different, non-overlapping code
+  space — "why isn't this vehicle in the plan"), rendering raw English
+  constant names instead of Hebrew. Fixed with a new, correctly-scoped
+  `EXCLUSION_REASON_LABELS` map in `constants.js` using SPEC §8.3's own
+  Hebrew text.
+- Human's 3 exact acceptance scenarios reproduced independently by the
+  orchestrator (separate disposable database, own script, not reusing
+  either agent's test run): baseline generate -> 262 eligible / 200 in-plan.
+  Exclude a selected vehicle -> 261 eligible / 199 in-plan. Regenerate ->
+  exclusion metadata and 261/200 (vehicle stays out) confirmed to survive
+  regeneration via a fresh, independent `GET /vehicles` call (SPEC §8.2).
+  Cancel that exclusion -> `exclusion` becomes `null` on the next GET, and
+  (in a from-scratch sequence replicating the human's exact ordering)
+  cancelling WITHOUT an intervening regeneration leaves 199 in-plan
+  (unchanged, SPEC §8.3 no-auto-readd) / 262 eligible (back up). Separately:
+  baseline plan, add a blocker to a currently-selected vehicle -> 261
+  eligible / 200 in-plan (membership unaffected, SPEC §9).
+- Error handler's 3 distinct paths independently reproduced: a known domain
+  error (`PLAN_NOT_PENDING_SHIPPING`) unchanged; the Batch-A no-body-request
+  finding now correctly returns a proper domain 4xx instead of 500; and a
+  genuinely forced internal failure (orchestrator dropped the `vehicles`
+  table in its own disposable database, the deliberately-last destructive
+  step before teardown) still sanitizes to `500 {"error":"INTERNAL_ERROR",
+  "message":"Unexpected server error"}` with no leaked DB internals.
+- `server/src/routes/vehicleCorrectionBatch.test.js` (new, Validator-owned):
+  6 tests. Full backend suite: 89/89 passing (83 prior + 6 new).
+- `npm run build`/`npm run lint` in `client/` independently reconfirmed
+  clean by the orchestrator (0 errors, 0 warnings).
+- Orchestrator confirmed no stray test databases left behind and the dev DB
+  untouched throughout (300 vehicles, 0 plans, unchanged).
+- Remaining limitation (unchanged from Batch A): no automated frontend
+  component-test suite exists yet (would need a new dependency); frontend
+  correctness relies on direct code review, build/lint, and live
+  backend-integration checks of the data the frontend consumes.
+- Not committed, not pushed. Batch B (Steps 5.5-5.9), Task 6, and
+  deployment remain out of scope and unstarted.
+
+#### Batch A visual refinement — complete
+
+- The human approved Design B's full-width vehicle workspace and requested Design A's compact quota bars and restrained styling. The [selected concept](design/task-5a-table-first-workspace.png) shows illustrative data.
+- The Planner shows the fixed date, demo identity and role disclaimer. Capacity, vehicle totals, plan status, brand quotas, current shipping limits and any return note sit above the table. Existing plans use the saved capacity and quota snapshots. Before generation, the limits come from current settings.
+- The RTL table shows all SPEC §6 display fields and isolates technical identifiers LTR. Envelope age uses the fixed date and warning thresholds from the settings API. Desktop filters stay above an internally scrolling table with sticky headers. Smaller screens use page scrolling and keep horizontal scrolling inside the table.
+- Search, brand, source, sorting and the four table tabs use the vehicle API. The eligibility tabs now account for active manual exclusions. The Planner derives global badges from its separate unfiltered response. Exclusion details and warnings for blocked plan members remain visible.
+- Chrome verified the seeded no-plan, draft and returned states at 1920 × 1080, desktop sizing at 1366 × 768, and scrolling behavior at 390 × 844. The human approved all three desktop captures. [No plan](design/task-5a-browser-no-plan.png) · [Draft](design/task-5a-browser-draft.png) · [Returned](design/task-5a-browser-returned.png)
+- Frontend build and lint passed. The isolated backend suite passed all 91 tests after adding two API regressions for exclusion, cancellation and blocked membership. The browser used a separately migrated and seeded database. Cleanup removed it, and read-only fingerprints of all eight development tables matched before and after browser verification.
+
+#### Step 5.5 — Recommendation generation
+- [ ] Generate/regenerate action with explicit confirmation when a plan
+  already exists (409 `CONFIRMATION_REQUIRED` handling)
+
+#### Step 5.6 — Exclusions and replacement recovery
+- [ ] Manual exclusion with required reason code (and note when `OTHER`),
+  suggested-replacement display and confirmation, recovery via
+  `GET /plan/replacement` after refresh, cancel-exclusion
+
+#### Step 5.7 — Blocker management
+- [ ] Add/remove vehicle blockers, warning display on in-plan members
+
+#### Step 5.8 — Submission and lifecycle
+- [ ] Submit-for-shipping action and resulting status/locking reflected in
+  the UI (no further edits once PENDING_SHIPPING/APPROVED)
+
+#### Step 5.9 — Integration, UX and acceptance tests
+- [ ] End-to-end frontend coverage against the real backend; SPEC §14
+  scenarios exercised through the UI
 
 ### Task 6 — Shipping and Admin Frontends
 Status: NOT STARTED
