@@ -16,7 +16,25 @@ class PlanServiceError extends Error {
 
 function assertPlannerRole(actorRole) {
   if (actorRole !== 'PLANNER') {
-    throw new PlanServiceError('FORBIDDEN_ROLE', `Role ${actorRole} is not authorized to generate a recommendation`);
+    throw new PlanServiceError('FORBIDDEN_ROLE', `Role ${actorRole} is not authorized to perform this action`);
+  }
+}
+
+// Serializes concurrent operations against this plan date, including the race
+// between two callers that both see no existing plan row yet.
+async function acquirePlanLock(transaction) {
+  await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key), 0)', {
+    replacements: { key: `plan:${PLAN_DATE}` },
+    transaction,
+  });
+}
+
+function assertEditablePlan(plan) {
+  if (!plan) {
+    throw new PlanServiceError('PLAN_NOT_FOUND', `No plan exists yet for ${PLAN_DATE}`);
+  }
+  if (!EDITABLE_STATUSES.includes(plan.status)) {
+    throw new PlanServiceError('PLAN_LOCKED', `Plan for ${PLAN_DATE} is ${plan.status} and cannot be edited`);
   }
 }
 
@@ -50,12 +68,7 @@ async function generatePlan({ actorName, actorRole }) {
   assertPlannerRole(actorRole);
 
   return db.sequelize.transaction(async (transaction) => {
-    // Serializes concurrent generation attempts for this plan date, including the
-    // race between two callers that both see no existing plan row yet.
-    await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key), 0)', {
-      replacements: { key: `plan:${PLAN_DATE}` },
-      transaction,
-    });
+    await acquirePlanLock(transaction);
 
     let plan = await db.Plan.findOne({ where: { plan_date: PLAN_DATE }, transaction });
     const isFirstGeneration = !plan;
@@ -167,4 +180,12 @@ async function generatePlan({ actorName, actorRole }) {
   });
 }
 
-module.exports = { generatePlan, PlanServiceError, PLAN_DATE };
+module.exports = {
+  generatePlan,
+  PlanServiceError,
+  PLAN_DATE,
+  EDITABLE_STATUSES,
+  assertPlannerRole,
+  assertEditablePlan,
+  acquirePlanLock,
+};

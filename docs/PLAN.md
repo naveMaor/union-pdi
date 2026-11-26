@@ -217,15 +217,66 @@ Acceptance:
 of docs/assignment/SPEC.md.
 
 ### Task 3 — Planner Operations
-Status: NOT STARTED
+Status: IN PROGRESS
 
-- Manual exclusions with required reasons
-- Cancel exclusions
-- Suggested replacements
-- Manual replacement confirmation
-- Add and remove blockers
-- Regenerate plans
-- Record audit events
+#### Step 3.1 — Shared planner validation and locking
+- [x] Shared helper(s) for PLANNER role enforcement and editable-status checks (DRAFT/RETURNED), reused by exclusion/replacement/blocker/regeneration operations
+- [x] Shared transaction/advisory-lock pattern reused from planService.js, not reimplemented
+
+#### Step 3.2 — Manual exclusions and cancellation
+- [x] Manual exclusion with required reason code, nonblank comment when reason is OTHER, actor name/role, timestamp (SPEC §8.3)
+- [x] Cancel an active exclusion, logged, vehicle returns to eligibility on the next regeneration only (not auto-added to the current draft)
+- [x] Audit events for exclusion and cancellation
+
+#### Step 3.3 — Replacement suggestions and confirmation
+- [x] Compute the single FIFO replacement candidate after an exclusion (SPEC §8.4): first eligible vehicle by envelope_date/vehicle_id not in the plan, not excluded, not breaching a HARD quota, using the plan's own capacity/quota snapshot
+- [x] Explicit confirmation step adds the suggested vehicle only (no free-form addition)
+- [x] Server recomputes and revalidates the replacement inside the transaction immediately before insertion; rejects a stale or arbitrary vehicle_id
+
+#### Step 3.4 — Exclusion/replacement tests
+- [x] Integration tests against real PostgreSQL in isolated test databases covering SPEC §14 tests 6-8 and relevant edge cases
+
+Verification:
+- `server/src/services/planEditService.js` (new): `excludeVehicle`,
+  `cancelExclusion`, `confirmReplacement`, `computeSuggestedReplacement`.
+  `planService.js` refactored (no behavior change) to export shared
+  `assertPlannerRole`/`assertEditablePlan`/`acquirePlanLock`/
+  `EDITABLE_STATUSES` helpers, reused here.
+- SPEC §14 tests 6-8 reproduced exactly, both by Builder's self-test and
+  independently by Validator and the orchestrator (separately, in their own
+  throwaway databases): excluding PDI-195 (Zeekr/FLEX) suggests PDI-200;
+  excluding PDI-281 (Toyota/HARD) suggests PDI-107; regeneration keeps an
+  excluded vehicle out, cancel does not re-add it to the current plan, a
+  further regeneration brings it back.
+- `OTHER` reason now genuinely requires a non-blank note (service-layer
+  enforcement — this closes the gap Step 1.5 had left as DB-unenforced and
+  explicitly deferred).
+- Replacement suggestion confirmed to use the plan's own frozen
+  `brand_quotas_snapshot`, not live settings, even after live quotas are
+  changed post-generation (SPEC §5.3 non-retroactivity).
+- Stale-suggestion rejection confirmed: a vehicle_id that no longer matches
+  a freshly recomputed suggestion (plan state changed since the suggestion
+  was shown) is rejected (`STALE_SUGGESTION`), not blindly inserted.
+- `server/src/services/planEditService.test.js` (new, Validator-owned): 12
+  tests. Full suite: 47/47 passing.
+- Orchestrator independently reran the full suite and its own separate
+  end-to-end script against a disposable database, reproducing both §14
+  numbers and all rejection paths directly.
+- Not yet implemented (Steps 3.5-3.8, out of scope for this round):
+  blockers, submission/regeneration integration beyond what's above, API
+  routes, frontend.
+
+#### Step 3.5 — Vehicle blockers (not started yet)
+- [ ] Add/remove blockers, SPEC §9 behavior including warning-only states and submission blocking
+
+#### Step 3.6 — Submission and regeneration integration (not started yet)
+- [ ] Submit-to-shipping transition, regeneration integration with exclusions/blockers
+
+#### Step 3.7 — Planner REST API (not started yet)
+- [ ] Fastify routes exposing Steps 3.1-3.6 to the frontend
+
+#### Step 3.8 — Integration tests and acceptance (not started yet)
+- [ ] End-to-end acceptance tests for all planner operations (SPEC §8-§9)
 
 Acceptance:
 All planner operations satisfy sections 8 and 9.
