@@ -24,13 +24,13 @@ assert.ok(
   `refusing to run planRoutes.test.js: resolved test database "${TEST_DB}" does not look like an isolated api-test database`
 );
 
-function adminClient() {
+function adminClient(database = 'postgres') {
   return new Client({
     host: config.host,
     port: config.port,
     user: config.username,
     password: config.password,
-    database: 'postgres',
+    database,
   });
 }
 
@@ -123,18 +123,125 @@ test('generate: SHIPPING role rejected with 403, PLANNER succeeds with DRAFT/200
   assert.deepEqual(util, { Toyota: 55, Lexus: 36, Geely: 44, GAC: 22, Zeekr: 43 });
 });
 
-test('regenerate without confirm is rejected (409 CONFIRMATION_REQUIRED); with confirm succeeds', async () => {
-  await generateBaseline();
+function assertConfirmationRequired(response, status) {
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(response.json(), {
+    error: 'CONFIRMATION_REQUIRED',
+    message: 'A plan already exists for this date. Resend with { "confirm": true } to regenerate it.',
+    plan: { status },
+  });
+}
 
-  const withoutConfirm = await inject(withRole('PLANNER', { method: 'POST', url: '/api/plan/generate' }));
-  assert.equal(withoutConfirm.statusCode, 409);
-  assert.equal(withoutConfirm.json().error, 'CONFIRMATION_REQUIRED');
+test('concurrent bodyless generation requests persist one plan and one recommendation run', async () => {
+  const gate = adminClient(TEST_DB);
+  await gate.connect();
+  const lockKey = 'plan:2026-11-23';
+  let requests;
+  try {
+    await gate.query('BEGIN');
+    await gate.query('SELECT pg_advisory_xact_lock(hashtext($1), 0)', [lockKey]);
+    const generate = () => inject(withRole('PLANNER', { method: 'POST', url: '/api/plan/generate' }));
+    requests = Promise.all([generate(), generate()]);
+
+    // Release the gate only when both requests are waiting on the actual plan lock.
+    const deadline = performance.now() + 5000;
+    let waiting;
+    do {
+      const result = await gate.query(
+        `SELECT count(*)::int AS waiting FROM pg_locks
+         WHERE locktype = 'advisory' AND NOT granted
+           AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+           AND classid = hashtext($1)::oid AND objid = 0 AND objsubid = 2`,
+        [lockKey]
+      );
+      waiting = result.rows[0].waiting;
+    } while (waiting < 2 && performance.now() < deadline);
+    assert.equal(waiting, 2);
+  } finally {
+    await gate.end();
+    await requests;
+  }
+
+  const responses = await requests;
+  assert.deepEqual(responses.map((response) => response.statusCode).sort(), [200, 409]);
+  const accepted = responses.find((response) => response.statusCode === 200).json();
+  assertConfirmationRequired(responses.find((response) => response.statusCode === 409), 'DRAFT');
+  const plans = await db.Plan.findAll();
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].id, accepted.plan.id);
+  assert.equal(plans[0].status, 'DRAFT');
+  assert.equal(plans[0].last_recommendation_run_at.toISOString(), accepted.plan.last_recommendation_run_at);
+  const members = await db.PlanVehicle.findAll({ order: [['vehicle_id', 'ASC']] });
+  assert.deepEqual(members.map((member) => member.vehicle_id), accepted.selected.map((row) => row.vehicle_id).sort());
+  assert.equal(members.length, 200);
+  assert.ok(members.every((member) => member.plan_id === accepted.plan.id && member.source === 'ALGORITHM'));
+  const events = await db.AuditEvent.findAll({ order: [['id', 'ASC']] });
+  assert.deepEqual(events.map((event) => event.event_type), ['STATUS_TRANSITION', 'RECOMMENDATION_RUN']);
+  assert.ok(events.every((event) => event.plan_id === accepted.plan.id));
+});
+
+test('existing DRAFT requires boolean confirmation before regeneration', async () => {
+  const baseline = await generateBaseline();
+
+  for (const payload of [undefined, { confirm: false }, { confirm: 'true' }]) {
+    const response = await inject(withRole('PLANNER', { method: 'POST', url: '/api/plan/generate', payload }));
+    assertConfirmationRequired(response, 'DRAFT');
+  }
+  assert.equal(await db.AuditEvent.count({ where: { event_type: 'RECOMMENDATION_RUN' } }), 1);
+  assert.equal((await db.Plan.findByPk(baseline.plan.id)).last_recommendation_run_at.toISOString(),
+    baseline.plan.last_recommendation_run_at);
 
   const withConfirm = await inject(
     withRole('PLANNER', { method: 'POST', url: '/api/plan/generate', payload: { confirm: true } })
   );
   assert.equal(withConfirm.statusCode, 200);
+  assert.equal(withConfirm.json().plan.id, baseline.plan.id);
   assert.equal(withConfirm.json().selected.length, 200);
+  assert.equal(await db.AuditEvent.count({ where: { event_type: 'RECOMMENDATION_RUN' } }), 2);
+});
+
+test('existing RETURNED requires confirmation and retains its status and note after regeneration', async () => {
+  const baseline = await generateBaseline();
+  const submit = await inject(withRole('PLANNER', { method: 'POST', url: '/api/plan/submit' }));
+  assert.equal(submit.statusCode, 200);
+  const comment = 'בדיקת הרצה של תכנית מוחזרת';
+  const returned = await inject(withRole('SHIPPING', {
+    method: 'POST', url: '/api/plan/return', payload: { comment },
+  }));
+  assert.equal(returned.statusCode, 200);
+
+  const unconfirmed = await inject(withRole('PLANNER', { method: 'POST', url: '/api/plan/generate' }));
+  assertConfirmationRequired(unconfirmed, 'RETURNED');
+  const confirmed = await inject(withRole('PLANNER', {
+    method: 'POST', url: '/api/plan/generate', payload: { confirm: true },
+  }));
+  assert.equal(confirmed.statusCode, 200);
+  assert.equal(confirmed.json().plan.id, baseline.plan.id);
+  assert.equal(confirmed.json().plan.status, 'RETURNED');
+  assert.equal(confirmed.json().plan.returned_note, comment);
+  assert.equal(await db.AuditEvent.count({ where: { event_type: 'RECOMMENDATION_RUN' } }), 2);
+});
+
+test('locked plans cannot regenerate with or without confirmation', async () => {
+  const baseline = await generateBaseline();
+
+  for (const [step, role, status] of [
+    ['submit', 'PLANNER', 'PENDING_SHIPPING'],
+    ['approve', 'SHIPPING', 'APPROVED'],
+  ]) {
+    const transition = await inject(withRole(role, { method: 'POST', url: `/api/plan/${step}` }));
+    assert.equal(transition.statusCode, 200);
+    for (const payload of [undefined, { confirm: true }]) {
+      const response = await inject(withRole('PLANNER', { method: 'POST', url: '/api/plan/generate', payload }));
+      assert.equal(response.statusCode, 409);
+      assert.equal(response.json().error, 'PLAN_LOCKED');
+    }
+    const plan = await db.Plan.findByPk(baseline.plan.id);
+    assert.equal(plan.status, status);
+    assert.equal(plan.last_recommendation_run_at.toISOString(), baseline.plan.last_recommendation_run_at);
+    assert.equal(await db.PlanVehicle.count({ where: { plan_id: baseline.plan.id } }), 200);
+    assert.equal(await db.AuditEvent.count({ where: { event_type: 'RECOMMENDATION_RUN' } }), 1);
+  }
 });
 
 test('GET /api/plan summary reflects the generated plan correctly', async () => {

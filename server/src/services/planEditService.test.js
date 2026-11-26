@@ -131,7 +131,7 @@ test('SPEC section 14 test 8: regeneration after exclusion keeps the vehicle out
     reasonCode: 'OPERATIONAL_DELAY',
   });
 
-  const regenerated = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER' });
+  const regenerated = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER', confirm: true });
   assert.equal(regenerated.selected.length, 200);
   assert.ok(!regenerated.selected.some((v) => v.vehicle_id === 'PDI-195'), 'excluded vehicle must not return after regen');
 
@@ -141,7 +141,7 @@ test('SPEC section 14 test 8: regeneration after exclusion keeps the vehicle out
   const stillAbsent = await db.PlanVehicle.findOne({ where: { plan_id: regenerated.plan.id, vehicle_id: 'PDI-195' } });
   assert.equal(stillAbsent, null);
 
-  const afterCancelRegen = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER' });
+  const afterCancelRegen = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER', confirm: true });
   assert.ok(afterCancelRegen.selected.some((v) => v.vehicle_id === 'PDI-195'), 'vehicle must return once its exclusion is cancelled and the plan regenerated');
 });
 

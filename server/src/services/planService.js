@@ -86,12 +86,15 @@ function buildBrandQuotasSnapshot(brandQuotaRows) {
  * @param {object} params
  * @param {string} params.actorName
  * @param {string} params.actorRole - must be 'PLANNER'
+ * @param {boolean} [params.confirm] - must be true to regenerate an existing editable plan
  * @returns {Promise<{plan: object, selected: object[], exclusions: object[], brandQuotaUtilization: object, sourceLocationCounts: object}>}
  */
-async function generatePlan({ actorName, actorRole }) {
+async function generatePlan({ actorName, actorRole, confirm }) {
   assertPlannerRole(actorRole);
 
-  return db.sequelize.transaction(async (transaction) => {
+  // The post-lock read must see a competing generation that committed while we waited.
+  const options = { isolationLevel: db.Sequelize.Transaction.ISOLATION_LEVELS.READ_COMMITTED };
+  return db.sequelize.transaction(options, async (transaction) => {
     await acquirePlanLock(transaction);
 
     let plan = await db.Plan.findOne({ where: { plan_date: PLAN_DATE }, transaction });
@@ -102,6 +105,15 @@ async function generatePlan({ actorName, actorRole }) {
         'PLAN_LOCKED',
         `Plan for ${PLAN_DATE} is ${plan.status} and cannot be regenerated`
       );
+    }
+
+    if (plan && confirm !== true) {
+      const error = new PlanServiceError(
+        'CONFIRMATION_REQUIRED',
+        'A plan already exists for this date. Resend with { "confirm": true } to regenerate it.'
+      );
+      error.planStatus = plan.status;
+      throw error;
     }
 
     // Sequential, not Promise.all: these share one transaction/connection, and
@@ -202,15 +214,6 @@ async function generatePlan({ actorName, actorRole }) {
       sourceLocationCounts: result.sourceLocationCounts,
     };
   });
-}
-
-/**
- * Returns the current Plan row for the fixed plan date, or null if none exists
- * yet. Read-only, no lock — used by the API layer to decide whether to require
- * an explicit regeneration-confirmation flag before calling generatePlan.
- */
-async function getCurrentPlan() {
-  return db.Plan.findOne({ where: { plan_date: PLAN_DATE } });
 }
 
 /**
@@ -369,7 +372,6 @@ module.exports = {
   submitForShipping,
   approveForShipping,
   returnToPlanner,
-  getCurrentPlan,
   PlanServiceError,
   PLAN_DATE,
   EDITABLE_STATUSES,

@@ -11,19 +11,17 @@ async function planRoutes(fastify) {
 
   fastify.post('/plan/generate', async (request, reply) => {
     const { actor } = request;
-    const confirm = request.body && request.body.confirm === true;
 
-    const existingPlan = await planService.getCurrentPlan();
-    if (existingPlan && !confirm) {
+    try {
+      return await planService.generatePlan({ actorName: actor.name, actorRole: actor.role, confirm: request.body?.confirm });
+    } catch (error) {
+      if (error.code !== 'CONFIRMATION_REQUIRED') throw error;
       return reply.code(409).send({
-        error: 'CONFIRMATION_REQUIRED',
-        message: 'A plan already exists for this date. Resend with { "confirm": true } to regenerate it.',
-        plan: { status: existingPlan.status },
+        error: error.code,
+        message: error.message,
+        plan: { status: error.planStatus },
       });
     }
-
-    const result = await planService.generatePlan({ actorName: actor.name, actorRole: actor.role });
-    return result;
   });
 
   fastify.get('/plan', async () => {

@@ -138,7 +138,7 @@ test('regeneration preserves a manual exclusion and clears a prior manual additi
     .find((v) => !first.selected.some((s) => s.vehicle_id === v.vehicle_id) && v.vehicle_id !== excludedId);
   await db.PlanVehicle.create({ plan_id: first.plan.id, vehicle_id: notSelectedEligible.vehicle_id, source: 'MANUAL' });
 
-  const second = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER' });
+  const second = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER', confirm: true });
 
   assert.ok(!second.selected.some((v) => v.vehicle_id === excludedId), 'excluded vehicle must never reappear');
   const manualRowsAfterRegen = await db.PlanVehicle.count({ where: { plan_id: second.plan.id, source: 'MANUAL' } });
@@ -169,7 +169,7 @@ test('snapshot is not retroactively changed by a later parameter edit, but refle
   assert.equal(unchangedPlan.capacity_snapshot, 200, 'parameter change must not retroactively alter an existing plan snapshot');
   assert.equal(unchangedPlan.brand_quotas_snapshot.Geely.quota_target, 32);
 
-  const regenerated = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER' });
+  const regenerated = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER', confirm: true });
   assert.equal(regenerated.plan.capacity_snapshot, 150, 'a new run must use current parameters');
   assert.equal(regenerated.plan.brand_quotas_snapshot.Geely.quota_target, 999);
 });
@@ -216,7 +216,7 @@ test('shipping_capacities values have zero effect on the generated selection', a
   await db.ShippingCapacity.update({ capacity: 1 }, { where: {} });
   t.after(() => db.ShippingCapacity.update({ capacity: 65 }, { where: {} }));
 
-  const regenerated = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER' });
+  const regenerated = await planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER', confirm: true });
 
   assert.deepEqual(
     regenerated.selected.map((v) => v.vehicle_id).sort(),
@@ -225,15 +225,16 @@ test('shipping_capacities values have zero effect on the generated selection', a
   assert.deepEqual(regenerated.sourceLocationCounts, baseline.sourceLocationCounts);
 });
 
-test('two concurrent first-generation calls serialize to exactly one Plan row (advisory lock)', async () => {
-  const [a, b] = await Promise.all([
+test('two concurrent unconfirmed service calls persist exactly one recommendation (advisory lock)', async () => {
+  const results = await Promise.allSettled([
     planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER' }),
     planService.generatePlan({ actorName: 'Michal Levi', actorRole: 'PLANNER' }),
   ]);
 
-  assert.equal(a.plan.id, b.plan.id);
-  const planCount = await db.Plan.count();
-  assert.equal(planCount, 1);
+  assert.deepEqual(results.map((result) => result.status).sort(), ['fulfilled', 'rejected']);
+  assert.equal(results.find((result) => result.status === 'rejected').reason.code, 'CONFIRMATION_REQUIRED');
+  assert.equal(await db.Plan.count(), 1);
+  assert.equal(await db.AuditEvent.count({ where: { event_type: 'RECOMMENDATION_RUN' } }), 1);
 });
 
 test('a failure mid-transaction leaves no partial Plan/PlanVehicle state behind', async () => {
