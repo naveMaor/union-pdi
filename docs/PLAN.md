@@ -470,8 +470,7 @@ Invalid actions are rejected server-side.
 ### Task 5 — Planner Frontend
 Status: IN PROGRESS
 
-Batch A (Steps 5.1–5.4) is complete. The human approved Design B and the
-three browser captures. Batch B (Steps 5.5–5.9) is pending.
+Steps 5.1–5.5 are complete and accepted. Steps 5.6–5.9 remain pending.
 
 Stack: React + Vite, plain JavaScript (no TypeScript), plain CSS (no
 component library), native `fetch` via a centralized API client. Hebrew RTL
@@ -685,8 +684,15 @@ endpoints):
 - Frontend build and lint passed. The isolated backend suite passed all 91 tests after adding two API regressions for exclusion, cancellation and blocked membership. The browser used a separately migrated and seeded database. Cleanup removed it, and read-only fingerprints of all eight development tables matched before and after browser verification.
 
 #### Step 5.5 — Recommendation generation
-- [ ] Generate/regenerate action with explicit confirmation when a plan
+- [x] Generate/regenerate action with explicit confirmation when a plan
   already exists (409 `CONFIRMATION_REQUIRED` handling)
+
+The frontend, screenshots and concurrent-generation correction are approved.
+
+- The Planner toolbar creates the first recommendation and opens a native confirmation dialog for DRAFT and RETURNED plans. The app refreshes plan, settings and vehicle reads without resetting filters. Generation is unavailable for PENDING_SHIPPING and APPROVED.
+- Headless Chrome verified the SPEC §14 totals, reload persistence, cancel and Escape, preservation of manual exclusions, clearing of manual additions, live settings and blocker use, RETURNED status, locked plans, duplicate clicks, a 500 response and recovery from a 409 confirmation conflict. Frontend build and lint and all 94 backend tests passed.
+- The route previously checked plan existence before acquiring the advisory lock. The service now checks plan existence, status and explicit confirmation inside the locked transaction. Two concurrent unconfirmed requests yield one successful run and one `409 CONFIRMATION_REQUIRED` with the existing response shape. Locked plans return `409 PLAN_LOCKED` whether or not the request includes confirmation.
+- Browser evidence [Create recommendation](design/task-5b1-create-recommendation.png) · [First-generation draft](design/task-5b1-first-generation-draft.png) · [Regeneration confirmation](design/task-5b1-regeneration-confirmation.png)
 
 #### Step 5.6 — Exclusions and replacement recovery
 - [ ] Manual exclusion with required reason code (and note when `OTHER`),

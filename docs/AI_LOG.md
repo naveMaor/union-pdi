@@ -205,3 +205,25 @@ The human completed visual review and approved Design B and the no-plan, draft a
 - The full backend suite passed 91/91, and frontend build and lint passed. A fresh headless Chrome run observed requests for the selected API tab and verified the corresponding rows, badge counts, exclusion details and blocked membership. The harness used another disposable database and kept the approved captures intact. Cleanup removed the test database, and all eight development-table fingerprints matched before and after the browser run.
 
 The human granted final approval for separate API, Planner, and documentation commits. The retained visual evidence is Design B and the three approved browser captures.
+
+## Task 5.5 recommendation generation and regeneration
+
+Codex started from accepted checkpoint `225aaa7`. Before changing the client, it verified the existing endpoint over HTTP on an isolated, migrated and CSV-seeded PostgreSQL database. A bodyless first POST returned 200 and a 200-vehicle DRAFT. A bodyless repeat returned `409 CONFIRMATION_REQUIRED`. A confirmed rerun preserved the plan ID and DRAFT status, and a locked confirmed request returned `409 PLAN_LOCKED`.
+
+- The existing Planner toolbar now shows the action for the current plan state. The native dialog starts focus on cancel and sends `{ "confirm": true }` only after an explicit confirmation. An in-flight guard prevents duplicate requests. The app re-reads plan, settings, global totals and filtered rows after each attempt. A confirmation conflict refreshes the display before the user can take another action.
+- Headless Chrome with the Chrome DevTools Protocol verified the first recommendation, exact SPEC §14 brand and source totals, reload, sticky headers and preserved search. Cancel and Escape sent no POST. Chrome also verified single submission on a same-tick double click, a test-injected 500 with retry, and recovery from a real 409 after a second request created the plan.
+- Isolated API fixtures excluded PDI-195, added PDI-200 manually, changed daily capacity to 195 and blocked PDI-023. The confirmed browser rerun used the new capacity and blocker, preserved PDI-195's exclusion metadata and left all membership rows with algorithmic provenance. A RETURNED rerun preserved the status and note. Chrome and direct HTTP checks verified locked behavior for PENDING_SHIPPING and APPROVED.
+- A separate direct HTTP concurrency check held the PostgreSQL plan lock until two bodyless requests passed the route precheck. Both returned 200, and one plan had two recommendation audit events. This existing server race is outside the approved frontend change.
+- Frontend build and lint passed. The full backend suite passed 91/91. Chrome captured three 1920 × 1080 screenshots. Disposable databases were removed, and before-and-after fingerprints of the eight development tables matched. The browser harness stayed in a temporary file.
+
+Step 5.5 is ready for human acceptance. Steps 5.6–5.9 remain pending.
+
+### Pre-commit concurrent generation correction
+
+The human approved the Step 5.5 frontend and screenshots and authorized the concurrent-generation correction. Codex added a route regression that held the existing PostgreSQL advisory lock, observed both requests queued in `pg_locks`, and released the lock after both were waiting. The regression reproduced two HTTP 200 responses before the fix.
+
+- The route passes the raw confirmation value into the service. The service uses the same advisory lock and reads the plan in a READ COMMITTED transaction after the lock is acquired. It rejects locked plans first, then requires literal boolean `true` for an editable existing plan. The route preserves the confirmation error code, message and `plan.status` payload. The write and audit paths are unchanged.
+- The coordinated test now gets one HTTP 200 and one 409, with a single plan, the winning request's membership and timestamp, and exactly one recommendation audit event. Independent API tests cover DRAFT confirmation, RETURNED status and note, and both locked statuses with and without confirmation. The service tests still verify exclusion preservation, manual addition clearing and audit behavior.
+- The full backend suite passed 94/94, and frontend build and lint passed. A separate headless Chrome run queued a browser POST behind another first-generation request, observed the browser's 409, and confirmed that a second browser POST occurred only after explicit dialog confirmation. The approved captures were preserved. The disposable browser database was removed and all eight development-table fingerprints matched.
+
+The human accepted Step 5.5 and approved separate local commits for the API correction, Planner implementation and verification evidence. Steps 5.6–5.9 remain pending.
