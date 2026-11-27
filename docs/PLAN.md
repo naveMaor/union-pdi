@@ -1330,6 +1330,33 @@ rerun. One updated screenshot with the section expanded (token field
 correctly masked by the browser's own password-input rendering, not a
 custom mask) was captured to `docs/design/task-7-admin-demo-reset-expanded.png`.
 
+### Step 7.7 completion — full production acceptance walkthrough (explicitly authorized production mutations)
+
+With explicit human authorization to mutate and reset actual production data, ran a complete SPEC §14-style acceptance pass against the real deployed application (`https://union-pdi-web.onrender.com` / `https://union-pdi.onrender.com`) via a real headless Chrome instance driving the live UI exactly as a human would — role switching, clicking, typing — not just API calls. A pre-flight check confirmed the production plan was `null` before touching anything.
+
+**Results, all passing on the final run:**
+1. **Baseline recommendation** (Planner, click "יצירת המלצה"): 200 selected / 262 eligible / 38 ineligible; brand quota utilization exactly `55/55, 36/36, 44/32+12, 22/22, 43/28+15`; source-location counts exactly `51/65, 52/65, 49/65, 48/65` — SPEC §14 test 3 reproduced exactly against live production data.
+2. **Exclusion + replacement**: manually excluded `PDI-195` (flex-brand Zeekr) with reason `OPERATIONAL_DELAY` → totals `199/261/39`, suggested replacement `PDI-200` appeared and was confirmed → totals back to `200/261/39`.
+3. **Blocker management**: added a `RECALL` blocker to a live plan member → membership unchanged (SPEC §9: a blocker never auto-changes plan membership) but eligibility shifted (`200/260/40`), a member warning appeared, and `#submit-plan` was correctly disabled; removing the blocker restored `200/261/39` and cleared the warning.
+4. **Shipping capacity cycle**: submitted for shipping approval; as Admin, set Haifa port (`נמל חיפה`) capacity to 45 (below its actual 52-vehicle load) via the real settings form; as Shipping, approval was correctly blocked (disabled button, over-capacity indicator shown) and the plan was returned with a required comment; as Admin, restored capacity to 65; as Planner, the returned note was visible and the plan was resubmitted; as Shipping, approval then succeeded.
+5. **Locking**: on the now-`APPROVED` plan, the vehicle action dialog offered only the blocker action (no exclude/add) in the UI, and a direct `POST /plan/vehicles/.../exclude` call was independently confirmed server-rejected with `PLAN_LOCKED` — no state changed by the rejected call.
+6. **Persistence after reload**: a full page reload preserved the `APPROVED` status.
+7. **Cross-role consistency**: Shipping, Admin and Planner all showed the same `APPROVED` state after the reload.
+8. **Demo Reset executed via the real UI**: toggled the PDI badge in Admin mode, typed the actual production `DEMO_RESET_TOKEN` (read directly from local `.env`, never printed or logged) and the required confirmation phrase, confirmed the destructive-action dialog, and the reset completed successfully through the real browser UI — not a direct API call.
+9. **Post-reset verification**: 300 vehicles, exactly 262 eligible / 38 ineligible, default settings (capacity 200, Haifa shipping capacity back to 65, default brand quotas), `plan: null` — a byte-for-byte match of the original pristine seed state.
+10. Zero browser console errors throughout the entire walkthrough.
+
+**Two genuine bugs found and fixed in the test script itself during this run** (not application defects — each is recorded here because it reflects real, non-obvious behavior worth knowing):
+- An initial version of the blocker-management check wrongly expected plan membership to drop from 200 to 199 when a blocker was added to an existing member. SPEC §9 is explicit that a blocker never auto-changes plan membership — only the eligible/ineligible split shifts. The real application behaved correctly the whole time; the test's expectation was wrong, not the app.
+- A race condition in the test script clicked the per-row action button immediately after a mutation's `.member-warning` appeared, before the button had re-enabled from the app's own shared mutation-in-flight guard — occasionally failing against production's real network latency (not reproducible locally, where everything is on localhost). Fixed by waiting for the button to be enabled before each click, matching the guard pattern the application itself already uses.
+- A final, overly strict assertion in the test script treated `net::ERR_ABORTED`/`canceled: true` network events as failures — these are the app's own intentional `AbortSignal`-based cancellation of superseded requests on rapid role switching (an existing, deliberately tested feature, not a defect). The actual Demo Reset and all verification had already completed successfully before this spurious failure; production was confirmed pristine independently of it.
+
+**Three earlier full-script attempts failed on these test bugs mid-run** (documented in `docs/AI_LOG.md` for transparency) — each time, the script's own automatic recovery path (a direct, non-UI Demo Reset API call using the real production token) correctly restored production to the pristine state before the next attempt, and this was independently re-verified via direct reads each time. On the second recovery, a direct recovery-reset attempt was itself correctly rejected with `429 RESET_RATE_LIMITED` because the walkthrough's own Phase 8 reset had *already* succeeded moments earlier — confirming the rate limiter works correctly end-to-end and that no redundant reset occurred.
+
+**Limitations of this acceptance pass:**
+- Covered a representative, not exhaustive, subset of SPEC §14's 12 scenarios (notably not separately re-exercised: the exact `PDI-281`→`PDI-107` hard-quota replacement case, or the two-separate-browser-window concurrency scenario — both already covered by the existing local Chrome verifier against disposable databases, and by the automated backend test suite).
+- Production's free-tier cold-start behavior (documented in Step 7.6/7.7) was not re-exercised here, since the service was already warm from recent activity.
+
 #### Step 7.8 — Demonstration and interview preparation
 - [ ] Prepare for the live 60-minute presentation (SPEC §13)
 

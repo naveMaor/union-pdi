@@ -307,4 +307,9 @@ caught them independently.
 - No dedicated automated frontend test suite (see above).
 - Free-tier hosting: see [Live deployment](#live-deployment) above for
   cold-start and database-expiry limitations. See `docs/PLAN.md` Task 7
-  for the full deployment and verification history.
+  for the full deployment and verification history, including a complete
+  SPEC §14-style acceptance walkthrough run against the live production
+  deployment itself (recommendation generation, exclusion/replacement,
+  blockers, the full shipping-capacity reject/return/approve cycle,
+  locking, persistence and cross-role consistency), ending in a real,
+  UI-driven Demo Reset that restored the exact original seed state.
