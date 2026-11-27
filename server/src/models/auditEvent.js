@@ -23,6 +23,7 @@ module.exports = (sequelize, DataTypes) => {
               'SETTINGS_CHANGED',
               'SHIPPING_APPROVED',
               'SHIPPING_RETURNED',
+              'DEMO_RESET',
             ],
           ],
         },

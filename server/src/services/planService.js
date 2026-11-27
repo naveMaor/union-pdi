@@ -44,9 +44,49 @@ function assertPendingShipping(plan) {
   }
 }
 
+// A reset is an exclusive-vs-all-business-mutations operation: every mutating
+// service transaction (plan, blocker, settings) takes this key in SHARED mode
+// before doing any writes, and the demo reset takes it in EXCLUSIVE mode. This
+// lets ordinary business mutations continue to run concurrently with each
+// other (shared locks never conflict with each other), while a reset waits for
+// any of them already in flight to finish, and blocks new ones from starting,
+// for the duration of its own transaction.
+const BUSINESS_VS_RESET_LOCK_KEY = 'demo-reset:business-vs-reset';
+// A separate key, held only by a reset itself, so two concurrent reset
+// attempts fail fast against each other (try-lock) instead of one silently
+// queuing behind the other.
+const RESET_MUTEX_LOCK_KEY = 'demo-reset:reset-mutex';
+
+async function acquireBusinessMutationLock(transaction) {
+  await db.sequelize.query('SELECT pg_advisory_xact_lock_shared(hashtext(:key), 0)', {
+    replacements: { key: BUSINESS_VS_RESET_LOCK_KEY },
+    transaction,
+  });
+}
+
+// Called only by demoResetService. Fails fast with RESET_IN_PROGRESS against a
+// concurrent reset, then blocks (briefly — ordinary business mutations are
+// fast) until no business mutation is still mid-transaction.
+async function acquireResetLocks(transaction) {
+  const [{ acquired }] = await db.sequelize.query(
+    'SELECT pg_try_advisory_xact_lock(hashtext(:key), 0) AS acquired',
+    { replacements: { key: RESET_MUTEX_LOCK_KEY }, transaction, type: db.Sequelize.QueryTypes.SELECT }
+  );
+  if (!acquired) {
+    throw new PlanServiceError('RESET_IN_PROGRESS', 'A demo reset is already running');
+  }
+  await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key), 0)', {
+    replacements: { key: BUSINESS_VS_RESET_LOCK_KEY },
+    transaction,
+  });
+}
+
 // Serializes concurrent operations against this plan date, including the race
-// between two callers that both see no existing plan row yet.
+// between two callers that both see no existing plan row yet. Also takes the
+// business-vs-reset shared lock first, so plan mutations are protected against
+// a concurrent demo reset the same way blocker/settings mutations are.
 async function acquirePlanLock(transaction) {
+  await acquireBusinessMutationLock(transaction);
   await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key), 0)', {
     replacements: { key: `plan:${PLAN_DATE}` },
     transaction,
@@ -380,4 +420,6 @@ module.exports = {
   assertAdminRole,
   assertEditablePlan,
   acquirePlanLock,
+  acquireBusinessMutationLock,
+  acquireResetLocks,
 };

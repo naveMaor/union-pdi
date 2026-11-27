@@ -112,4 +112,13 @@ if (require.main === module) {
     });
 }
 
-module.exports = { run, parseVehiclesCsv, seedVehicles, seedDefaults };
+module.exports = {
+  run,
+  parseVehiclesCsv,
+  seedVehicles,
+  seedDefaults,
+  CSV_PATH,
+  DEFAULT_SETTINGS,
+  DEFAULT_BRAND_QUOTAS,
+  DEFAULT_SHIPPING_CAPACITIES,
+};

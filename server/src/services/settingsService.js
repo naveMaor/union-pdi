@@ -1,7 +1,7 @@
 'use strict';
 
 const db = require('../models');
-const { PlanServiceError, assertAdminRole } = require('./planService');
+const { PlanServiceError, assertAdminRole, acquireBusinessMutationLock } = require('./planService');
 
 const BRANDS = ['Toyota', 'Lexus', 'Geely', 'GAC', 'Zeekr'];
 const SOURCE_LOCATIONS = ['נמל אשדוד', 'נמל חיפה', 'בונדד אשדוד', 'בונדד חיפה'];
@@ -120,6 +120,8 @@ async function updateSettings({
   }
 
   return db.sequelize.transaction(async (transaction) => {
+    await acquireBusinessMutationLock(transaction);
+
     const changes = [];
 
     if (dailyCapacity !== undefined || envelopeYellowThresholdDays !== undefined || envelopeRedThresholdDays !== undefined) {

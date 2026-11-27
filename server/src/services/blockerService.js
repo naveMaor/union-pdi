@@ -1,7 +1,7 @@
 'use strict';
 
 const db = require('../models');
-const { PlanServiceError, assertPlannerRole } = require('./planService');
+const { PlanServiceError, assertPlannerRole, acquireBusinessMutationLock } = require('./planService');
 
 const BLOCKER_CODES = ['RECALL', 'WORK_STOP', 'MISSING_ACCESSORY', 'DAMAGE', 'ZERO_KM_STOP'];
 
@@ -28,6 +28,8 @@ async function addBlocker({ actorName, actorRole, vehicleId, blockerCode }) {
   }
 
   return db.sequelize.transaction(async (transaction) => {
+    await acquireBusinessMutationLock(transaction);
+
     const vehicle = await loadVehicle(vehicleId, transaction);
     const previousBlocker = vehicle.active_blocker;
 
@@ -58,6 +60,8 @@ async function removeBlocker({ actorName, actorRole, vehicleId }) {
   assertPlannerRole(actorRole);
 
   return db.sequelize.transaction(async (transaction) => {
+    await acquireBusinessMutationLock(transaction);
+
     const vehicle = await loadVehicle(vehicleId, transaction);
     if (vehicle.active_blocker === 'NONE') {
       throw new PlanServiceError('NO_ACTIVE_BLOCKER', `${vehicleId} has no active blocker to remove`);
