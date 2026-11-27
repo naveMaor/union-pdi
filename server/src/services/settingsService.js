@@ -98,6 +98,9 @@ async function updateSettings({
     }
   }
   if (shippingCapacities !== undefined) {
+    if (shippingCapacities === null || typeof shippingCapacities !== 'object' || Array.isArray(shippingCapacities)) {
+      throw new PlanServiceError('INVALID_SETTING_VALUE', 'shippingCapacities must be an object');
+    }
     for (const [sourceLocation, capacity] of Object.entries(shippingCapacities)) {
       if (!SOURCE_LOCATIONS.includes(sourceLocation)) {
         throw new PlanServiceError('INVALID_SETTING_VALUE', `${sourceLocation} is not a known source location`);

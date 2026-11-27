@@ -338,7 +338,7 @@ async function approveForShipping({ actorName, actorRole }) {
  */
 async function returnToPlanner({ actorName, actorRole, comment }) {
   assertShippingRole(actorRole);
-  if (!comment || !comment.trim()) {
+  if (typeof comment !== 'string' || !comment.trim()) {
     throw new PlanServiceError('COMMENT_REQUIRED', 'A nonblank comment is required to return a plan');
   }
 

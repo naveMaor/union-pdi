@@ -102,6 +102,17 @@ async function getPendingShippingBaseline() {
   return gen.json();
 }
 
+async function readPlanSettingsAndAudit(planId) {
+  const [plan, membership, settings, audit] = await Promise.all([
+    db.Plan.findByPk(planId, { raw: true }),
+    db.PlanVehicle.findAll({ where: { plan_id: planId }, order: [['vehicle_id', 'ASC']], raw: true }),
+    inject(withRole('ADMIN', { method: 'GET', url: '/api/settings' })),
+    db.AuditEvent.findAll({ order: [['id', 'ASC']], raw: true }),
+  ]);
+  assert.equal(settings.statusCode, 200);
+  return { plan, membership, settings: settings.json(), audit };
+}
+
 test('SPEC section 14 test 9: capacity 45 at נמל חיפה (52 in plan) blocks approval; return without comment rejected; with comment succeeds', async () => {
   const baseline = await getPendingShippingBaseline();
 
@@ -148,6 +159,40 @@ test('approve/return role-gated to SHIPPING only', async () => {
     withRole('PLANNER', { method: 'POST', url: '/api/plan/return', payload: { comment: 'x' } })
   );
   assert.equal(returnAsPlanner.statusCode, 403);
+});
+
+test('return rejects missing and invalid comments without writes, and a valid comment preserves the lifecycle', async () => {
+  const { plan } = await getPendingShippingBaseline();
+  const before = await readPlanSettingsAndAudit(plan.id);
+  const returnRequest = (payload) => inject(withRole('SHIPPING', { method: 'POST', url: '/api/plan/return', payload }));
+
+  for (const payload of [undefined, {}, ...[null, 42, false, [], {}, '', ' \t\n '].map((comment) => ({ comment }))]) {
+    const detail = `return payload ${JSON.stringify(payload)}`;
+    const response = await returnRequest(payload);
+    assert.equal(response.statusCode, 400, detail);
+    assert.equal(response.json().error, 'COMMENT_REQUIRED', detail);
+    assert.deepEqual(await readPlanSettingsAndAudit(plan.id), before, detail);
+  }
+
+  const comment = '  יש לבדוק את עומס השילוח  ';
+  const response = await returnRequest({ comment });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().plan.status, 'RETURNED');
+  const returned = await readPlanSettingsAndAudit(plan.id);
+  assert.equal(returned.plan.status, 'RETURNED');
+  assert.equal(returned.plan.returned_note, comment);
+  assert.deepEqual(returned.membership, before.membership);
+  assert.deepEqual(returned.settings, before.settings);
+  assert.equal(returned.audit.length, before.audit.length + 1);
+  const transition = returned.audit.at(-1);
+  assert.equal(transition.plan_id, plan.id);
+  assert.equal(transition.event_type, 'STATUS_TRANSITION');
+  assert.equal(transition.actor_role, 'SHIPPING');
+  assert.deepEqual(transition.payload, { from: 'PENDING_SHIPPING', to: 'RETURNED', comment });
+
+  const resubmitted = await inject(withRole('PLANNER', { method: 'POST', url: '/api/plan/submit' }));
+  assert.equal(resubmitted.statusCode, 200);
+  assert.equal(resubmitted.json().plan.status, 'PENDING_SHIPPING');
 });
 
 test('approval succeeds when all 4 sources are within capacity', async () => {
@@ -259,6 +304,37 @@ test('settings: invalid values rejected server-side with 400, valid updates pers
   const reread = await inject(withRole('ADMIN', { method: 'GET', url: '/api/settings' }));
   assert.equal(reread.json().dailyCapacity, 180);
   assert.equal(reread.json().brandQuotas.Geely.quota_target, 40);
+});
+
+test('settings: malformed shipping maps reject the whole update without changing plan, settings or audit', async () => {
+  const { plan } = await getPendingShippingBaseline();
+  const before = await readPlanSettingsAndAudit(plan.id);
+
+  for (const shippingCapacities of [null, 0, 45, false, '', '45', [], [45], { 'נמל חיפה': null }]) {
+    const detail = `shippingCapacities ${JSON.stringify(shippingCapacities)}`;
+    const response = await inject(withRole('ADMIN', {
+      method: 'PUT', url: '/api/settings', payload: { dailyCapacity: 195, shippingCapacities },
+    }));
+    assert.equal(response.statusCode, 400, detail);
+    assert.equal(response.json().error, 'INVALID_SETTING_VALUE', detail);
+    assert.deepEqual(await readPlanSettingsAndAudit(plan.id), before, detail);
+  }
+
+  const empty = await inject(withRole('ADMIN', { method: 'PUT', url: '/api/settings', payload: { shippingCapacities: {} } }));
+  assert.equal(empty.statusCode, 200);
+  assert.deepEqual(await readPlanSettingsAndAudit(plan.id), before);
+
+  const partial = await inject(withRole('ADMIN', {
+    method: 'PUT', url: '/api/settings', payload: { shippingCapacities: { 'נמל חיפה': 45 } },
+  }));
+  assert.equal(partial.statusCode, 200);
+  assert.deepEqual(partial.json().shippingCapacities, { ...before.settings.shippingCapacities, 'נמל חיפה': 45 });
+  const updated = await readPlanSettingsAndAudit(plan.id);
+  assert.deepEqual(updated.plan, before.plan);
+  assert.deepEqual(updated.membership, before.membership);
+  assert.deepEqual(updated.settings, { ...before.settings, shippingCapacities: partial.json().shippingCapacities });
+  assert.equal(updated.audit.length, before.audit.length + 1);
+  assert.equal(updated.audit.at(-1).event_type, 'SETTINGS_CHANGED');
 });
 
 test('settings changes do not retroactively affect an existing plan, but a subsequent regeneration picks up the new values', async () => {
