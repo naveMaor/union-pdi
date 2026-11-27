@@ -227,3 +227,17 @@ The human approved the Step 5.5 frontend and screenshots and authorized the conc
 - The full backend suite passed 94/94, and frontend build and lint passed. A separate headless Chrome run queued a browser POST behind another first-generation request, observed the browser's 409, and confirmed that a second browser POST occurred only after explicit dialog confirmation. The approved captures were preserved. The disposable browser database was removed and all eight development-table fingerprints matched.
 
 The human accepted Step 5.5 and approved separate local commits for the API correction, Planner implementation and verification evidence. Steps 5.6–5.9 remain pending.
+
+## Batch B2 vehicle exclusions, replacement recovery and blockers
+
+Codex started from accepted checkpoint `56e7272`. Before editing the client, it inspected the routes and services and exercised the contracts over HTTP in a fresh CSV-seeded database. Exclusion and replacement writes require an editable plan. Blockers are vehicle properties and can change when a plan is locked, with no membership or status change. The browser uses the existing API for eligibility, candidate selection and write validation.
+
+- The Planner adds a contextual vehicle dialog, keeps exclusion metadata visible after reload, and shows the server's single replacement above the table. It re-reads the suggestion after writes and handles `STALE_SUGGESTION` without sending a new confirmation. One in-flight guard covers generation, exclusions, replacements and blockers. Filter state is kept while the authoritative reads refresh.
+- The Chrome verifier exercised both SPEC §14 replacement pairs independently, including the 199 → 200 membership transitions. It checked cancellation without re-add, all six reasons, whitespace-only `OTHER` validation, persisted actor/note/time, DRAFT and RETURNED recovery, read and mutation errors, stale and full replacement responses, and no candidate with unused capacity.
+- The verifier also checked all five blocker choices, recalculation of the replacement after blocker changes, and selected-vehicle warnings in both locked statuses. It verified that a concurrent lock stops a replacement, while a blocker still changes eligibility without changing membership or status. Delayed search and mutation fixtures verified request ordering and duplicate suppression.
+- Testing found that a rapid reopen after Escape could arrive before the native dialog's queued close event cleared the selected row. Codex made dismissal clear that state synchronously after closing the dialog and reverified focus return and immediate reopening. The replacement read-failure fixture was held active until Chrome displayed the error, then released to verify retry.
+- Full backend suite 94/94, frontend build and lint, and headless Chrome assertions passed. The retained `client/scripts/verify-batch-b2.cjs` uses Chrome DevTools Protocol and Node's built-in WebSocket. Fixtures changed only named vehicle blockers and restored them before reuse. Development-table fingerprints matched before and after the API probe and the browser run, and temporary databases were removed. Five 1920 × 1080 Chrome captures are stored under `docs/design/task-5b2-*.png`.
+
+The human accepted Steps 5.6–5.7, the verification results and all five
+browser captures, and approved separate Planner and documentation commits.
+Steps 5.8–5.9 remain pending.

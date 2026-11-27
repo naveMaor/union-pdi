@@ -470,7 +470,7 @@ Invalid actions are rejected server-side.
 ### Task 5 — Planner Frontend
 Status: IN PROGRESS
 
-Steps 5.1–5.5 are complete and accepted. Steps 5.6–5.9 remain pending.
+Steps 5.1–5.7 are complete and accepted. Steps 5.8–5.9 remain pending.
 
 Stack: React + Vite, plain JavaScript (no TypeScript), plain CSS (no
 component library), native `fetch` via a centralized API client. Hebrew RTL
@@ -695,12 +695,36 @@ The frontend, screenshots and concurrent-generation correction are approved.
 - Browser evidence [Create recommendation](design/task-5b1-create-recommendation.png) · [First-generation draft](design/task-5b1-first-generation-draft.png) · [Regeneration confirmation](design/task-5b1-regeneration-confirmation.png)
 
 #### Step 5.6 — Exclusions and replacement recovery
-- [ ] Manual exclusion with required reason code (and note when `OTHER`),
+- [x] Manual exclusion with required reason code (and note when `OTHER`),
   suggested-replacement display and confirmation, recovery via
   `GET /plan/replacement` after refresh, cancel-exclusion
 
 #### Step 5.7 — Blocker management
-- [ ] Add/remove vehicle blockers, warning display on in-plan members
+- [x] Add/remove vehicle blockers, warning display on in-plan members
+
+Batch B2 is complete and accepted. The human approved the verification
+results and all five browser captures.
+
+- Independent Chrome fixtures verified (§14) PDI-195 → PDI-200 and PDI-281 → PDI-107. Each exclusion left 199 members, and each explicit replacement restored 200. Cancelling an exclusion in a separate case restored eligibility and left membership at 199.
+- Chrome verified the six exclusion reasons, `OTHER` note validation, persisted details after reload, replacement recovery in DRAFT and RETURNED, replacement read failures, stale or concurrently full suggestions and exhaustion with spare capacity. The browser also verified duplicate suppression, keyboard dismissal and rapid filter changes.
+- Blocker add and remove refresh eligibility, warnings and the suggested replacement. Chrome verified unchanged membership and status in DRAFT, PENDING_SHIPPING and APPROVED, including a failed request and retry. Locked plans retain vehicle blocker controls and hide membership actions and the replacement panel.
+- All 94 backend tests and frontend build and lint passed. The retained Chrome verifier uses fresh Vite and Fastify listeners and an isolated CSV-seeded database. Development-table fingerprints matched before and after verification.
+- Browser evidence [Exclusion dialog](design/task-5b2-exclusion-dialog.png) · [Replacement panel](design/task-5b2-replacement-panel.png) · [Persisted exclusion](design/task-5b2-persisted-exclusion.png) · [Blocker controls](design/task-5b2-blocker-controls.png) · [Locked-plan warning](design/task-5b2-blocker-warning.png)
+
+To reproduce the Chrome checks, use Node.js 24, install the locked
+dependencies in both `client/` and `server/` with `npm ci`, and have
+`google-chrome` on `PATH` or set `PDI_CHROME_BIN` to the Chrome executable.
+With the local PostgreSQL instance running, configure the root `.env` and
+ensure the development schema is migrated. The configured database role
+needs to read the development tables for fingerprints and create and drop
+its own disposable database. The script creates, migrates, seeds and
+drops that database. Run it separately from other PostgreSQL-backed
+tests because cleanup checks for remaining test databases. See the
+[local database setup](../README.md#database-postgresql-via-docker-compose).
+
+From the repository root, run `node client/scripts/verify-batch-b2.cjs`.
+Add `--screenshots` to replace the five Batch B2 captures under
+`docs/design/`.
 
 #### Step 5.8 — Submission and lifecycle
 - [ ] Submit-for-shipping action and resulting status/locking reflected in
