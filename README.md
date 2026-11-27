@@ -5,6 +5,24 @@ Full-stack PDI (Pre-Delivery Inspection) planning application for Union
 Motors, built for the Full Stack AI-Native take-home assignment. The full
 specification is in `docs/assignment/SPEC.md` (Hebrew, authoritative).
 
+## Live deployment
+
+- **Application:** <https://union-pdi-web.onrender.com>
+- **API:** <https://union-pdi.onrender.com> (health check: `/ping`)
+
+Both run on Render's free tier:
+
+- **Cold start:** the backend web service sleeps after a period of
+  inactivity. The first request after a period of inactivity can take tens
+  of seconds while it wakes up and the page may need a refresh; subsequent
+  requests are immediate. The static frontend has no server process and
+  does not sleep.
+- **Database lifetime:** the free PostgreSQL instance expires 30 days
+  after creation (created 2026-11-27, expires 2026-12-27). If it has
+  expired, the database needs to be recreated and the backend's database
+  environment variables updated accordingly — the application code itself
+  requires no changes for this.
+
 ## Role simulation is not authentication
 
 The application has no login. A role switcher in the header lets the
@@ -120,14 +138,46 @@ this same root file; there is no separate `server/.env`):
 - `CORS_ORIGIN` — the single frontend origin allowed to call the API
 - `NODE_ENV` — `development` or `test`; also set automatically by the test
   suite
+- `DEMO_RESET_ENABLED`, `DEMO_RESET_TOKEN` — off by default; see
+  [Demo Reset](#demo-reset) below
 
 `client/.env`:
 
 - `VITE_API_BASE_URL` — base URL the frontend uses to reach the API
 
+## Demo Reset
+
+An off-by-default Admin feature for restoring the database to its original
+seed state (all 300 vehicles, settings, brand quotas and shipping
+capacities back to their exact CSV/default values, and no plans, plan
+membership, manual exclusions or prior audit history) — useful for
+resetting between interview/demo sessions. **It is a demo convenience, not
+a security mechanism**, and it is a genuinely destructive, irreversible
+action.
+
+It is gated by three independent layers: `DEMO_RESET_ENABLED=true` must be
+set, or the server never registers the endpoint at all; a separate
+`DEMO_RESET_TOKEN` (recommended: a long random string, generated
+independently of any other secret; the server enforces only a minimum of
+8 characters) must be supplied in an `x-demo-reset-token` header on every
+request — the `ADMIN` demo role alone is not sufficient, since role
+simulation is explicitly not authentication (see above); and an explicit
+confirmation is required on every call. Failed token attempts and
+successful resets are both rate-limited. The token is never embedded in
+the frontend bundle, never pre-filled, and never persisted client-side —
+the Admin operator types it by hand each time into a password-style input.
+
+**Finding it in the UI:** the section is hidden by default and adds no
+visible clutter for the other two roles. In Admin mode, click the "PDI"
+badge in the header (next to "UNION MOTORS") to reveal it; click it again,
+switch roles, or reload the page to hide it — any of these also clears
+whatever was typed into the password/confirmation fields, so nothing
+lingers in memory. The badge is a real, keyboard-operable `<button>`
+(disabled outside Admin mode), not a hidden gesture.
+
 ## Running tests
 
-Backend (100 tests at time of writing — model/service unit tests and
+Backend (110 tests at time of writing — model/service unit tests and
 Fastify route integration tests, run against real, isolated,
 PID-suffixed PostgreSQL databases that are created and dropped per test
 file; the shared development database is never touched):
@@ -255,6 +305,6 @@ caught them independently.
 ## Remaining limitations
 
 - No dedicated automated frontend test suite (see above).
-- Deployment: at the time of writing the application is not yet deployed
-  to a public host; see `docs/PLAN.md` Task 7 for the in-progress
-  deployment plan.
+- Free-tier hosting: see [Live deployment](#live-deployment) above for
+  cold-start and database-expiry limitations. See `docs/PLAN.md` Task 7
+  for the full deployment and verification history.

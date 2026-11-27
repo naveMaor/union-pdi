@@ -934,10 +934,401 @@ anywhere in source, confirmed by grep and by a clean build/lint after
 deleting them) were removed.
 
 #### Step 7.6 — Deployment
-- [ ] Deploy to the chosen public host
+- [x] Deploy to the chosen public host
+
+Provisioned via the authenticated Render API (no dashboard clicking):
+backend web service `union-pdi` (named `union-pdi` by the human when
+originally created, not `union-pdi-api`), PostgreSQL `union-pdi-db`, and
+static site `union-pdi-web` — all free tier, Frankfurt region.
+
+**Authentication defect found and fixed before this step.** The backend's
+first two deploys both failed at the migration step with
+`password authentication failed for user "union_pdi_user"`. Diagnosed
+directly via the Render API (service env vars + Postgres connection-info,
+comparing only value lengths/prefixes, never printing secrets): two env
+vars on the backend had been populated with the wrong field's value —
+`POSTGRES_DB` held the Postgres **hostname** instead of the database name
+`union_pdi` (same 26-character value as `DB_HOST`), and `POSTGRES_PASSWORD`
+held the entire **internal connection string** (97 characters) instead of
+just the real 32-character password. `POSTGRES_USER` and `DB_HOST` were
+already correct. Fixed by `PUT`-ing the two correct values
+(`POSTGRES_DB=union_pdi`, the real password from the Postgres instance's
+connection-info) via the Render API, then triggering a manual redeploy
+(env var updates via the API do not auto-trigger a deploy the way the
+dashboard does). Migrations and seed then succeeded
+(`Seed complete. vehicles=300`), confirmed from the deploy's runtime logs.
+
+Static site `union-pdi-web` created pointing at the same repo/branch, Root
+Directory blank, build command
+`npm ci --include=dev --prefix client && npm run build --prefix client`,
+Publish Directory `client/dist`, `NODE_VERSION=24`,
+`VITE_API_BASE_URL=https://union-pdi.onrender.com/api`. Backend's
+`CORS_ORIGIN` then updated to the static site's actual assigned origin
+`https://union-pdi-web.onrender.com` (no trailing slash) and the backend
+redeployed once to pick it up.
+
+**Verified against the live deployment:**
+- Frontend root (`https://union-pdi-web.onrender.com/`) returns 200; its
+  built JS/CSS assets (`/assets/index-*.js`, `/assets/index-*.css`,
+  `/favicon.svg`) all resolve with 200.
+- The built JS bundle has the correct backend URL
+  (`https://union-pdi.onrender.com/api`) baked in at build time.
+- Backend `/ping` returns `{"status":"ok", ...}`.
+- A real cross-origin CORS preflight (`OPTIONS`, `Origin:
+  https://union-pdi-web.onrender.com`) returns 204 with
+  `access-control-allow-origin` matching exactly and
+  `access-control-allow-methods` including GET/POST/PUT/PATCH/DELETE.
+- An actual cross-origin `GET /api/vehicles` with `x-demo-role: PLANNER`
+  returns 200 with 300 vehicles and a correct
+  `access-control-allow-origin` header.
+
+Not run this step: a full headless-Chrome pass of
+`verify-batch-b2.cjs` against production (that script targets a local Vite
+dev server + disposable DB, not the deployed static build) and a full
+backend regression rerun (backend code unchanged since the last local
+run; only env vars were corrected).
 
 #### Step 7.7 — Deployed application acceptance
-- [ ] Verify the live deployment against SPEC §14
+- [x] Verify the live deployment against SPEC §14
+
+**UI verified directly against the live deployment**
+(`https://union-pdi-web.onrender.com`) via a real headless Chrome instance
+over the DevTools Protocol, read-only (navigation, role switching via the
+client-side `<select>`, and a page reload only — no mutating API calls):
+`dir="rtl"` on `<html>`; correct Hebrew header per role (PLANNER/SHIPPING/
+ADMIN); the Planner table renders all 300 seed vehicles; state survives a
+full page reload; zero browser console errors or warnings; zero failed
+network requests; every observed `/api/*` response was `200` (plus
+expected `204` CORS preflights).
+
+**Production data verified read-only** against
+`https://union-pdi.onrender.com`: `GET /api/vehicles?tab=all` returns 300
+vehicles with exactly 262 eligible / 9 not customs-released / 29 blocked —
+matching SPEC §14 scenario 2 exactly. `GET /api/settings` returns the
+unmodified defaults (capacity 200; quotas Toyota 55/HARD, Lexus 36/HARD,
+Geely 32/FLEX, GAC 22/HARD, Zeekr 28/FLEX; all four shipping capacities
+65; thresholds 9/14), confirming settings persisted correctly from seed
+and were not corrupted by the earlier env var incident. `GET /api/plan`
+returns `{"plan": null}` — a pristine, never-mutated state, exactly
+matching a fresh seed.
+
+**Role enforcement:** not tested with a live mutating request against
+production — an attempted `PUT /api/settings` as `PLANNER` was itself
+blocked by the orchestrator's own tool-permission classifier as a
+production write, before it ever reached the server, consistent with the
+"no writes without approval" constraint for this step. Server-side role
+enforcement is covered by the existing 100 passing backend tests (the
+exact same code now running in production, unchanged since the last
+local test run), so this is inferred from that coverage rather than
+re-verified live.
+
+**Cold start and database expiry:** the backend and static site are both
+on Render's free tier, which sleeps a web service after a period of
+inactivity (free-tier policy; the static site itself cannot sleep —
+there's no server process — only the backend web service can). Not
+timed directly (would require a genuinely idle ~15+ minute wait); when a
+cold request does arrive, Render returns a loading page / delayed
+response until the instance wakes, then runs the same
+`migrate && seed && start` sequence verified safe in Step 7.6. The
+PostgreSQL free instance's `expiresAt` was read directly from the Render
+API: created `2026-11-27`, expires `2026-12-27` (the 30-day free-tier
+lifetime, already accepted as a known risk in Step 7.5 with
+recreate/upgrade as contingency).
+
+**`npm audit` reviewed for production relevance** (not run with
+`--force`, no dependency changes made): 7 moderate findings total in
+`server/` (2 with `--omit=dev`, matching "production" dependencies; 5
+only appear with dev dependencies included). All 5 dev-only findings
+(`glob`, `minimatch` via `editorconfig`/`js-beautify`, pulled in
+transitively only by `sequelize-cli`) are in tooling never loaded by the
+running server — zero production exposure. The 2 remaining findings are
+both the same advisory, `uuid <11.1.1` (GHSA-w5hq-g745-h8pq, "missing
+buffer bounds check... when `buf` is provided"), pulled in transitively
+by `sequelize`. The vulnerable code path requires a caller to pass an
+explicit `buf` argument to a `uuid` v3/v5/v6 function; neither this
+project's code nor Sequelize's own internal UUID generation does this —
+low real-world relevance to this application. No forced update applied,
+per instruction; a non-breaking `sequelize` patch release addressing this
+transitively can be picked up later without `--force`.
+
+**Safe production mutation-test sequence (proposed, not executed):**
+current production state (`plan: null`, unmodified default settings) is
+already the cleanest possible demonstration baseline — there is no
+"delete plan" endpoint in SPEC, so once a plan is generated it cannot be
+removed back to `null`, only regenerated (overwritten) while `DRAFT`/
+`RETURNED`. Recommended sequence, to be run only with separate explicit
+approval and ideally right before the actual demo/interview rather than
+now:
+1. Generate the base recommendation (`DRAFT`, reversible — regenerating
+   again fully overwrites it).
+2. Exercise reversible actions only: add then remove a blocker; manually
+   exclude a vehicle then regenerate to restore it; change an Admin
+   setting then change it back to the documented default.
+3. Deliberately stop before `PENDING_SHIPPING`/`APPROVED` — those are the
+   only irreversible transitions (approved plans can never be edited
+   again, and a pending/approved plan cannot be edited either), so
+   reaching them would permanently end the "clean, resettable" state.
+4. Leave the plan in `DRAFT` as the end state (not `null` — accepted,
+   since no reset path to `null` exists without a full DB recreate).
+
+**Gap from Step 7.7, now fixed:** `README.md` now has a "Live deployment"
+section with both public URLs, the cold-start behavior and the exact
+database expiry date (2026-12-27).
+
+### Demo Reset feature — implemented and verified (not yet committed)
+
+A minimal, off-by-default Admin UI feature to restore the original
+300-vehicle dataset, settings, quotas and a null-plan state on demand —
+useful for resetting to a clean state between interview/demo sessions
+without a manual DB recreate. Proposed only; no code has been written.
+
+**Gating (defense in depth, three independent layers):**
+1. `DEMO_RESET_ENABLED=true` env var — if not exactly `"true"`, the route
+   is never even *registered* on the Fastify instance, so in a normal
+   production deployment the endpoint does not exist at all (not just
+   "rejected" — there is nothing to probe).
+2. A separate `DEMO_RESET_TOKEN` env var (long random string, generated
+   independently of any other secret), compared against an
+   `x-demo-reset-token` request header using `crypto.timingSafeEqual`
+   (constant-time, avoids a timing side-channel). `ADMIN` role alone is
+   **not** sufficient — the demo-role header is explicitly documented as
+   not authentication (SPEC §4), so this feature needs its own real
+   secret on top of it.
+3. An explicit confirmation body, `{"confirm":"RESET_DEMO_DATA"}` — a
+   request missing this exact literal is rejected with `400
+   CONFIRMATION_REQUIRED` before anything is touched.
+
+**New files (proposed):**
+- `server/src/routes/demoResetRoutes.js` — registers `POST /api/demo/reset`
+  only when enabled (see above); checks role, token, and confirmation in
+  that order; enforces a simple in-process rate limit (reject a second
+  call within 60 seconds of the last one with `429
+  RESET_RATE_LIMITED` — adequate for Render's free single-instance
+  deployment, no new dependency needed).
+- `server/src/services/demoResetService.js` — the actual reset, as one
+  Sequelize transaction:
+  1. `SELECT pg_try_advisory_xact_lock(<fixed key>)` first — if another
+     reset is already mid-flight, fail fast with `RESET_IN_PROGRESS`
+     (`409`) rather than risk two resets interleaving (the in-process
+     rate limit alone wouldn't protect against two near-simultaneous
+     requests both passing that check before either finishes).
+  2. Delete, in FK-safe order: `audit_events` → `plan_vehicles` →
+     `manual_exclusions` → `plans` (restores the null-plan state; no
+     SPEC-defined "delete plan" endpoint exists for normal use, but this
+     demo-only path is explicitly exempt from that rule and clearly
+     labeled as such).
+  3. Restore all 300 vehicles to their exact original CSV values via
+     **reused** `seed.js` logic: `parseVehiclesCsv()` (already exported)
+     feeding `db.Vehicle.bulkCreate(vehicles, { updateOnDuplicate: [...all
+     non-key columns], transaction })` — a single upsert restores
+     `active_blocker` and every other seeded column in one step, rather
+     than a bespoke per-column reset.
+  4. Reset `settings`/`brand_quotas`/`shipping_capacities` to the same
+     `DEFAULT_SETTINGS`/`DEFAULT_BRAND_QUOTAS`/`DEFAULT_SHIPPING_CAPACITIES`
+     constants `seed.js` already defines (to be additionally exported
+     from `seed.js` rather than duplicated).
+  5. Insert exactly one fresh `audit_events` row recording the reset
+     itself (`event_type: 'DEMO_RESET'`, actor name/role from the
+     authenticated ADMIN demo session) — the reset is itself an audited
+     action, not a silent wipe; this is the *only* audit row left
+     afterward, by design.
+- **Migration required:** `audit_events` has a DB-level `CHECK` constraint
+  on `event_type` (`audit_events_event_type_check`, from migration
+  `20261125120008-create-audit-events.js`) — a new migration must drop and
+  recreate that constraint to add `'DEMO_RESET'` to the allowed list. This
+  is a real schema change and needs the same explicit approval as any
+  other migration.
+- `client/src/screens/AdminScreen.jsx`: a visually distinct, clearly
+  labeled "demo data reset" section (not hidden), gated purely by whether
+  `POST /api/demo/reset` exists at all (a `404` means the feature is off
+  in this deployment, shown as a plain informational message, not an
+  error). A password-type input lets the operator type the reset token by
+  hand each time — **the token itself is never embedded in the frontend
+  bundle, never pre-filled, never written to `localStorage`, and exists
+  only transiently in React state for the one request** — plus a
+  type-to-confirm text field requiring the literal phrase before the
+  reset button becomes enabled. Reuses the existing `usePlanMutation` hook
+  (same pattern as every other Admin mutation) so success/error feedback
+  and post-mutation refetching work exactly like the rest of the screen.
+
+**Focused tests (proposed), server-side only:**
+1. `DEMO_RESET_ENABLED` unset/`false` → the route doesn't exist (`404`).
+2. Valid role+confirm but wrong/missing token → `403
+   INVALID_RESET_TOKEN`, and a direct DB check confirms zero rows changed.
+3. Valid token but role ≠ `ADMIN` → `403 FORBIDDEN_ROLE`, no changes.
+4. Valid token + `ADMIN` but missing/wrong confirmation phrase → `400
+   CONFIRMATION_REQUIRED`, no changes.
+5. The full successful path: vehicles end up exactly matching the CSV
+   (sampled against a few known blocked/unblocked `vehicle_id`s),
+   settings/quotas/capacities match defaults, `plans`/`plan_vehicles`/
+   `manual_exclusions` are empty, and `audit_events` contains exactly one
+   `DEMO_RESET` row.
+6. Concurrency: two reset requests fired together — exactly one succeeds,
+   the other gets `409 RESET_IN_PROGRESS` (reusing this codebase's
+   existing pattern, seen in `verify-batch-b2.cjs`, of hooking a request
+   to introduce a deliberate delay to force the race deterministically).
+7. Rate limit: a second valid request within 60 seconds of a successful
+   reset gets `429 RESET_RATE_LIMITED`.
+
+**Production acceptance/reset sequence (updated per approval):** the
+feature is allowed to remain enabled throughout the recruitment process
+(superseding this proposal's original "disable again after each use"
+suggestion) — set `DEMO_RESET_ENABLED=true` and a freshly generated,
+strong `DEMO_RESET_TOKEN` as Render env vars once, redeploy, and leave it
+enabled. Each time it's used: send the reset request with the token →
+reuse the same read-only verification already built for Step 7.7
+(eligibility counts, settings defaults, `plan: null`) to confirm the
+result. The token itself remains the only gate between sessions; rotating
+it (new Render env var value + redeploy) is the way to revoke access if
+ever needed, without having to disable the feature entirely.
+
+Documented transparently here, in `docs/AI_LOG.md`, and in `README.md`'s
+new "Demo Reset" section — described throughout as a demo-only,
+off-by-default-unless-explicitly-enabled convenience, never as, or relying
+on it as, a security mechanism.
+
+**Implemented and verified** (Orchestrator only, no agents, per explicit
+approval). Changed/added files:
+
+- `server/src/scripts/seed.js` — additionally exports `CSV_PATH`,
+  `DEFAULT_SETTINGS`, `DEFAULT_BRAND_QUOTAS`, `DEFAULT_SHIPPING_CAPACITIES`
+  (no behavior change; reused by the reset service instead of duplicating
+  these literals).
+- `server/src/services/planService.js` — two new advisory-lock helpers:
+  `acquireBusinessMutationLock` (shared lock, taken by every business
+  mutation) and `acquireResetLocks` (try-lock against a second concurrent
+  reset, then the same lock in exclusive mode, so a reset waits for any
+  in-flight business mutation and blocks new ones for its duration).
+  `acquirePlanLock` now also takes the shared lock first, so the four
+  plan-mutating functions that already called it
+  (`generatePlan`/`submitForShipping`/`approveForShipping`/
+  `returnToPlanner`, plus `planEditService.js`'s four functions which call
+  the same helper) are protected against a concurrent reset with no
+  further changes needed in those files.
+- `server/src/services/blockerService.js`, `settingsService.js` — each
+  mutating function now takes the shared business-mutation lock first
+  (these never had any advisory lock before, since they aren't scoped to
+  a single plan date).
+- `server/src/services/demoResetService.js` (new) — the actual reset, one
+  transaction: acquire the reset locks → delete
+  `audit_events`/`plan_vehicles`/`manual_exclusions`/`plans` (FK-safe
+  order) → restore all 300 vehicles from the CSV via
+  `seed.js`'s `parseVehiclesCsv()` and a single `bulkCreate` upsert →
+  reset settings/brand quotas/shipping capacities to the same defaults
+  `seed.js` uses → insert exactly one `DEMO_RESET` audit row.
+- `server/src/routes/demoResetRoutes.js` (new) — registers `POST
+  /api/demo/reset` only when `DEMO_RESET_ENABLED==='true'`; fails closed
+  (throws at startup) if enabled with a missing/short token; checks role
+  → attempt-lockout state → token (constant-time comparison) → reset-rate
+  limit → confirmation phrase, in that order; a rejected request never
+  touches the database.
+- `server/src/migrations/20261127140000-add-demo-reset-audit-event-type.js`
+  (new) — `audit_events.event_type` has a genuine database-level `CHECK`
+  constraint (confirmed, not assumed, during the original proposal); this
+  migration drops and recreates it to add `'DEMO_RESET'`.
+- `server/src/models/auditEvent.js` — added `'DEMO_RESET'` to the matching
+  app-level `validate.isIn` list.
+- `.env.example` (root) — documents `DEMO_RESET_ENABLED`/
+  `DEMO_RESET_TOKEN` (names only, both left blank/false).
+- `client/src/api/client.js` — `request()` now accepts an optional
+  `headers` override (needed for `x-demo-reset-token`, which must never
+  go through the normal `x-demo-role` path); new `api.demoReset(role,
+  token)`.
+- `client/src/screens/AdminScreen.jsx` — a new, visually distinct "Demo
+  Data Reset" (`איפוס נתוני דמו`) section: a password-style token input
+  (never pre-filled, cleared immediately after every attempt, never
+  persisted), a type-to-confirm phrase input, and a second confirmation
+  dialog (reusing the existing `PlannerDialog` component and the same
+  interaction pattern as the existing "discard changes" dialog) before
+  the actual request is sent.
+- `client/src/App.css` — `.recommendation-danger` and `.admin-danger-zone`
+  classes, reusing the existing `--red`/`--red-tint` design tokens rather
+  than introducing new ones.
+- `server/src/routes/demoResetRoutes.test.js` (new) — 10 focused tests:
+  the 7 originally proposed (disabled → 404; wrong token → 403; wrong role
+  → 403; missing/wrong confirm → 400; full success path restores
+  vehicles/settings/quotas and leaves exactly one `DEMO_RESET` audit row;
+  two concurrent resets → one 200 and one 409; rapid repeat → 429) plus
+  three more this round's instructions specifically asked for: repeated
+  failed-token attempts triggering a lockout (429 even with the correct
+  token afterward); a concurrent ordinary business mutation (`addBlocker`)
+  running alongside a reset, verified to end in one consistent
+  non-corrupted state rather than a torn write; and a forced mid-transaction
+  failure (dropping `audit_events` right before the reset's own insert into
+  it) proving the whole reset rolls back with zero partial state left
+  behind.
+
+**Verification performed, all against real, disposable, CSV-seeded
+PostgreSQL databases — never the shared development database:**
+- Full backend suite: **110/110** (100 pre-existing + 10 new demo-reset
+  tests), including every existing plan/blocker/settings test still
+  passing unchanged with the new advisory-lock calls in place.
+- Frontend `npm run build` and `npm run lint` (`oxlint`): both clean.
+- The complete retained Chrome verifier (`verify-batch-b2.cjs`): every
+  existing Planner/Shipping/Admin/cross-role scenario still passes
+  end-to-end (a leftover test database from an earlier, unrelated
+  interrupted test run was found and dropped during this check — not
+  something this verifier itself leaked).
+- A new, focused, disposable-DB Chrome verification of the Demo Reset UI
+  specifically: the reset button stays disabled until both the token and
+  the exact confirmation phrase are filled in; a wrong token is rejected
+  server-side with the correct Hebrew error message and leaves the
+  dirtied plan/blocker state completely untouched; a correct token
+  produces the success message and an actual, verified reset (`plan:
+  null`, 300 vehicles, default settings) — all with zero browser console
+  errors throughout.
+- Development database fingerprints (all 8 tables) confirmed unchanged
+  before and after this entire round of work.
+
+**Final UI refinements (Orchestrator only, no agents; backend unchanged
+this round — reused the independently-verified 110/110 result):**
+
+- **Hidden by default, toggled via the "PDI" badge.** The badge in the
+  header (`client/src/App.jsx`) is now a real `<button id="pdi-badge-toggle">`
+  — disabled (inert) outside Admin mode, and in Admin mode toggles a
+  `showDemoReset` flag that gates the whole danger-zone section in
+  `AdminScreen.jsx`. Being a native, non-disabled `<button>` makes it
+  keyboard-operable (Enter/Space) by HTML semantics, with no custom key
+  handling needed.
+- **Clears on hide, on role switch, and implicitly on reload.** Toggling
+  the badge off, or switching away from Admin and back (which resets the
+  toggle to hidden), immediately clears both the password and confirmation
+  fields — adjusted during render (comparing the current value against a
+  tracked previous one) rather than via `useEffect`, per React's "you
+  might not need an Effect" guidance; `oxlint`'s `react(set-state-in-effect)`
+  warning was hit and fixed this way rather than suppressed. A full page
+  reload clears everything for free, since none of this is persisted
+  anywhere.
+- **Visual redesign.** The former large, filled pink panel is now a
+  compact white card (`var(--surface)` background) with a thin
+  `var(--red)` border, reusing the existing `.recommendation-danger`
+  button class (pale-red background, red text by default; solid red only
+  on actual mouse hover) rather than a heavier always-solid-red button.
+- **Natural Hebrew copy**, exactly as specified: title "איפוס סביבת
+  ההדגמה", description "שחזור 300 הרכבים והגדרות המערכת למצבם המקורי.",
+  a bolded red warning line, password label "סיסמת איפוס", and the
+  confirmation instruction referencing the existing confirmation phrase
+  (`איפוס נתוני דמו`, unchanged — it's also the literal string the server
+  still requires in the request body, so it could not be changed without
+  breaking the two in sync). The confirmation dialog's title/description
+  and the final confirm button were aligned to the same wording for
+  internal consistency.
+- Server-side authorization, confirmation phrase, rate limiting and the
+  reset transaction itself are completely untouched this round — this was
+  a pure client-side presentation/UX pass.
+
+**Verification:** `npm run build`/`npm run lint` clean (zero warnings,
+including after fixing the effect-based state pattern above); the
+existing focused Chrome script was extended with new assertions —
+default-hidden on entering Admin, the badge is a real disabled-outside-
+Admin button, opening via a click, clearing on toggle-off, clearing after
+a role round-trip (Planner → Admin), and the full existing wrong-token/
+success-reset flow still passing unchanged — all against the same
+disposable, CSV-seeded database pattern as before. Backend was not
+touched, so the previously-verified 110/110 suite was reused rather than
+rerun. One updated screenshot with the section expanded (token field
+correctly masked by the browser's own password-input rendering, not a
+custom mask) was captured to `docs/design/task-7-admin-demo-reset-expanded.png`.
 
 #### Step 7.8 — Demonstration and interview preparation
 - [ ] Prepare for the live 60-minute presentation (SPEC §13)
