@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '../..');
 const captureScreenshots = process.argv.includes('--screenshots');
 const captureB3Screenshots = captureScreenshots || process.argv.includes('--b3-screenshots');
 const captureShippingScreenshots = captureScreenshots || process.argv.includes('--shipping-screenshots');
+const captureAdminScreenshots = captureScreenshots || process.argv.includes('--admin-screenshots');
 const server = path.join(root, 'server');
 const { Client } = require(server + '/node_modules/pg');
 const database = 'union_pdi_test_b2_browser_' + process.pid;
@@ -115,9 +116,15 @@ async function main() {
     let delayMutation;
     let failReplacementRead = false;
     let delayShippingRead = false;
+    let delayAdminRead = false;
+    let rejectSettingsWrite = false;
     app.addHook('onRequest', async (request, reply) => {
       if (failReplacementRead && request.method === 'GET' && request.url === '/api/plan/replacement') {
         return reply.code(500).send({ error: 'INTERNAL_ERROR' });
+      }
+      if (rejectSettingsWrite && request.method === 'PUT' && request.url === '/api/settings') {
+        rejectSettingsWrite = false;
+        return reply.code(400).send({ error: 'INVALID_SETTING_VALUE' });
       }
       if (request.method !== 'GET' && request.url === failMutation) {
         failMutation = undefined;
@@ -130,6 +137,8 @@ async function main() {
       if (request.url.includes('search=PDI-00&')) await pause(650);
       if (delayShippingRead && request.method === 'GET' && request.url === '/api/plan' &&
           request.headers['x-demo-role'] === 'SHIPPING') await pause(650);
+      if (delayAdminRead && request.method === 'GET' && request.url === '/api/settings' &&
+          request.headers['x-demo-role'] === 'ADMIN') await pause(650);
     });
     const apiUrl = await app.listen({ port: 0, host: '127.0.0.1' });
     const ping = await (await fetch(apiUrl + '/ping')).json();
@@ -183,6 +192,7 @@ async function main() {
     const cancelledRequests = [];
     const cancelledRequestIds = new Set();
     const planReads = [];
+    const settingsReads = [];
     const mutations = [];
     const exceptions = [];
     page = await connectCdp(pages.find((target) => target.type === 'page').webSocketDebuggerUrl, (msg) => {
@@ -193,6 +203,7 @@ async function main() {
         requests.push(url);
         requestUrls.set(msg.params.requestId, url);
         if (method === 'GET' && pathname === '/api/plan') planReads.push({ id: msg.params.requestId, role });
+        if (method === 'GET' && pathname === '/api/settings') settingsReads.push({ id: msg.params.requestId, role });
         if (method !== 'GET' && pathname.startsWith('/api/')) {
           mutations.push({ url: pathname, method, postData, role });
         }
@@ -270,10 +281,13 @@ async function main() {
     }
 
     async function photo(name, batch = 'b2') {
-      const enabled = { b2: captureScreenshots, b3: captureB3Screenshots, '6a': captureShippingScreenshots };
-      if (!enabled[batch]) return;
+      const batchCapture = {
+        b2: [captureScreenshots, '5b2'], b3: [captureB3Screenshots, '5b3'],
+        '6a': [captureShippingScreenshots, '6a'], '6b': [captureAdminScreenshots, '6b'],
+      };
+      const [enabled, task] = batchCapture[batch];
+      if (!enabled) return;
       const png = await cdp('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
-      const task = batch === '6a' ? '6a' : `5${batch}`;
       writeFileSync(path.join(root, 'docs/design', `task-${task}-${name}.png`), Buffer.from(png.data, 'base64'));
     }
 
@@ -819,7 +833,7 @@ async function main() {
     await matches('.shipping-screen .plan-status', 'אושרה');
     assert.equal(await exists('.planner-screen'), false);
     await input('#role-select', 'ADMIN');
-    await matches('main', 'יתווסף בשלב הבא');
+    await until(() => exists('.admin-settings-form'), 'loaded Admin settings');
     assert.equal(await exists(submitPlan), false);
     await input('#role-select', 'PLANNER');
     await tableRows(300);
@@ -1047,6 +1061,286 @@ async function main() {
     })()`), true);
     assert.deepEqual(exceptions, []);
     console.log('Chrome Shipping: no-plan/DRAFT, 200-row review, blocker warning and approval, reload, live 52/45 overflow, return dialog, resubmission, stale status, role cancellation and responsive layout.');
+
+    const adminForm = '.admin-settings-form';
+    const adminSave = '#admin-save';
+    const adminReload = '#admin-reload';
+    const adminDiscard = '.admin-discard-dialog';
+    const dailyCapacity = '#admin-daily-capacity';
+    const yellowThreshold = '#admin-yellow-threshold';
+    const redThreshold = '#admin-red-threshold';
+    const haifaLimit = '#admin-shipping-1';
+    const adminSettings = () => api('/settings', 'GET', undefined, 'ADMIN');
+    const settingsWrites = () => mutationCount('/settings');
+    const fieldValue = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.value`);
+    const adminValues = `Array.from(document.querySelectorAll('${adminForm} input, ${adminForm} select'), field => [field.id, field.value])`;
+
+    async function showAdmin() {
+      await enabled('#role-select');
+      await input('#role-select', 'ADMIN');
+      await enabled(adminReload);
+      await until(() => exists(adminForm), 'settled Admin settings');
+    }
+
+    await setView(1920, 1080);
+    await resetFixtures();
+    await showPlanner('טרם נוצרה תכנית');
+    await enabled(recommendation);
+    await click(recommendation);
+    await totals(200, 262, 38);
+    await focusVehicle('PDI-023');
+    await matches('tbody .age-chip.age-high', '44');
+    const originalPlan = await readPlan();
+    const originalMembers = await selectedIds();
+    const initialAdminRead = settingsReads.length;
+    await showAdmin();
+    assert.match(await textAt('#role-select option:checked'), /רונית שמש/);
+    assert.ok(settingsReads.slice(initialAdminRead).some(({ role }) => role === 'ADMIN'));
+    assert.equal(await exists('.planner-screen, .shipping-screen, #submit-plan, #shipping-approve'), false);
+    assert.equal(await evaluate(`document.querySelector('${adminSave}').disabled`), true);
+    const initialFields = Object.fromEntries(await evaluate(adminValues));
+    assert.deepEqual(initialFields, {
+      'admin-daily-capacity': '200', 'admin-yellow-threshold': '9', 'admin-red-threshold': '14',
+      'admin-quota-target-Toyota': '55', 'admin-quota-type-Toyota': 'HARD',
+      'admin-quota-target-Lexus': '36', 'admin-quota-type-Lexus': 'HARD',
+      'admin-quota-target-Geely': '32', 'admin-quota-type-Geely': 'FLEX',
+      'admin-quota-target-GAC': '22', 'admin-quota-type-GAC': 'HARD',
+      'admin-quota-target-Zeekr': '28', 'admin-quota-type-Zeekr': 'FLEX',
+      'admin-shipping-0': '65', 'admin-shipping-1': '65', 'admin-shipping-2': '65', 'admin-shipping-3': '65',
+    });
+    assert.deepEqual(await evaluate(`[
+      getComputedStyle(document.querySelector('${adminForm}')).direction,
+      getComputedStyle(document.querySelector('${dailyCapacity}')).direction,
+    ]`), ['rtl', 'ltr']);
+    await photo('admin-default-settings', '6b');
+
+    const beforeInvalid = await adminSettings();
+    const initialSettingsWrites = settingsWrites();
+    const initialSettingsAudit = await auditCount('SETTINGS_CHANGED');
+    for (const [field, value] of [
+      [dailyCapacity, '0'], [yellowThreshold, ''], [redThreshold, '-1'],
+      ['#admin-quota-target-Toyota', '55.5'], ['#admin-shipping-0', 'abc'], [haifaLimit, '2147483648'],
+    ]) await input(field, value);
+    await click(adminSave);
+    await matches('.admin-screen [role=alert]', 'יש לתקן את הערכים המסומנים');
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('${adminForm} [aria-invalid="true"]')).length`), 6);
+    assert.equal(await evaluate(`document.activeElement.id`), 'admin-daily-capacity');
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('${adminForm} [aria-invalid="true"]')).every(field =>
+      document.getElementById(field.getAttribute('aria-describedby'))?.textContent.trim())`), true);
+    assert.equal(settingsWrites(), initialSettingsWrites);
+    assert.deepEqual(await adminSettings(), beforeInvalid);
+    assert.equal(await auditCount('SETTINGS_CHANGED'), initialSettingsAudit);
+    await photo('admin-validation', '6b');
+
+    await evaluate(`document.querySelector('${adminReload}').focus()`);
+    await click(adminReload);
+    await until(() => exists(adminDiscard + '[open]'), 'discard settings dialog');
+    assert.equal(await evaluate(`Boolean(document.activeElement.closest('${adminDiscard}'))`), true);
+    await pressEscape();
+    await until(async () => !(await exists(adminDiscard + '[open]')), 'discard dialog Escape');
+    assert.equal(await evaluate(`document.activeElement.id`), 'admin-reload');
+    assert.equal(await fieldValue(dailyCapacity), '0');
+    await click(adminReload);
+    await until(() => exists(adminDiscard + '[open]'), 'discard settings dialog reopens');
+    await click('#admin-confirm-reload');
+    await enabled(adminReload);
+    assert.deepEqual(Object.fromEntries(await evaluate(adminValues)), initialFields);
+    assert.equal(settingsWrites(), initialSettingsWrites);
+
+    await input(dailyCapacity, '196');
+    await showPlanner('טיוטה');
+    await showAdmin();
+    assert.equal(await fieldValue(dailyCapacity), '200');
+    assert.equal(settingsWrites(), initialSettingsWrites);
+    assert.equal((await api('/settings', 'PUT', { dailyCapacity: 195 }, 'PLANNER', 403)).error, 'FORBIDDEN_ROLE');
+
+    for (const [field, value] of [[dailyCapacity, '195'], [yellowThreshold, '100'], [redThreshold, '120'], [haifaLimit, '45']]) {
+      await input(field, value);
+    }
+    rejectSettingsWrite = true;
+    await click(adminSave);
+    await matches('.admin-screen [role=alert]', 'השרת דחה את הערכים');
+    await enabled(adminSave);
+    assert.equal(await fieldValue(dailyCapacity), '195');
+    assert.deepEqual(await adminSettings(), beforeInvalid);
+    assert.equal(await auditCount('SETTINGS_CHANGED'), initialSettingsAudit);
+
+    failMutation = '/api/settings';
+    await click(adminSave);
+    await matches('.admin-screen [role=alert]', 'לא התקבל אישור על שמירת ההגדרות');
+    await enabled(adminSave);
+    assert.equal(await fieldValue(haifaLimit), '45');
+    assert.deepEqual(await adminSettings(), beforeInvalid);
+    assert.equal(await auditCount('SETTINGS_CHANGED'), initialSettingsAudit);
+
+    delayMutation = '/api/settings';
+    await evaluate(`(() => {
+      const save = document.querySelector('${adminSave}');
+      save.click();
+      save.click();
+    })()`);
+    await until(() => evaluate(`document.querySelector('${adminSave}').disabled &&
+      document.querySelector('${adminReload}').disabled && document.querySelector('#role-select').disabled`), 'Admin duplicate and conflicting action guard');
+    await matches('.admin-screen [role=status]', 'ההגדרות נשמרו');
+    await enabled(adminReload);
+    assert.equal(settingsWrites(), initialSettingsWrites + 3);
+    assert.equal(await auditCount('SETTINGS_CHANGED'), initialSettingsAudit + 1);
+    const latestSettingsWrite = mutations.filter(({ url }) => url === '/api/settings').at(-1);
+    const changedSettings = {
+      dailyCapacity: 195, envelopeYellowThresholdDays: 100, envelopeRedThresholdDays: 120,
+      shippingCapacities: { 'נמל חיפה': 45 },
+    };
+    assert.deepEqual({ ...latestSettingsWrite, postData: JSON.parse(latestSettingsWrite.postData) }, {
+      url: '/api/settings', method: 'PUT', role: 'ADMIN', postData: changedSettings,
+    });
+    const persistedAdminSettings = await adminSettings();
+    assert.deepEqual(persistedAdminSettings, {
+      ...beforeInvalid, ...changedSettings,
+      shippingCapacities: { ...beforeInvalid.shippingCapacities, ...changedSettings.shippingCapacities },
+    });
+    const adminAudit = await db.AuditEvent.findOne({ where: { event_type: 'SETTINGS_CHANGED' }, order: [['id', 'DESC']] });
+    assert.equal(adminAudit.actor_name, 'רונית שמש');
+    assert.equal(adminAudit.actor_role, 'ADMIN');
+    assert.deepEqual(adminAudit.payload.changes.find(change => change.setting === 'shipping_capacity:נמל חיפה'), {
+      setting: 'shipping_capacity:נמל חיפה', before: { capacity: 65 }, after: { capacity: 45 },
+    });
+    await photo('admin-saved-changes', '6b');
+
+    const savedFields = await evaluate(adminValues);
+    const { browserContextId: adminContextId } = await browser.send('Target.createBrowserContext', { disposeOnDetach: true });
+    const { targetId: adminTargetId } = await browser.send('Target.createTarget', { url: 'about:blank', browserContextId: adminContextId });
+    const { sessionId: adminSessionId } = await browser.send('Target.attachToTarget', { targetId: adminTargetId, flatten: true });
+    const adminCdp = (method, params) => browser.send(method, params, adminSessionId);
+    const adminEvaluate = (expression) => evaluateIn(adminCdp, expression);
+    await adminCdp('Page.enable');
+    await adminCdp('Page.navigate', { url: site });
+    await until(() => adminEvaluate("Boolean(document.querySelector('#role-select'))"), 'second Admin context selector');
+    assert.equal(await adminEvaluate("localStorage.getItem('pdi-verifier-context')"), null);
+    await adminEvaluate(`(() => {
+      const role = document.querySelector('#role-select');
+      role.value = 'ADMIN';
+      role.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await until(async () => (await adminEvaluate(adminValues)).length === savedFields.length, 'second Admin context settings');
+    assert.deepEqual(await adminEvaluate(adminValues), savedFields);
+    await reloadPage(cdp, evaluate);
+    await showAdmin();
+    assert.deepEqual(await evaluate(adminValues), savedFields);
+    await browser.send('Target.disposeBrowserContext', { browserContextId: adminContextId });
+    console.log('Chrome Admin: defaults, form validation and focus, discard and reload, server rejection and retry, duplicate suppression, sparse write, correct audit user, and settings persistence in two contexts.');
+
+    await showPlanner('טיוטה');
+    await matches('.stat-strip .stat-tile-value[dir=ltr]', '200 / 200');
+    await matches(overflow, '52 / 45');
+    await focusVehicle('PDI-023');
+    await matches('tbody .age-chip', '44');
+    assert.equal(await exists('tbody .age-chip.age-high, tbody .age-chip.age-medium'), false);
+    assert.deepEqual(await selectedIds(), originalMembers);
+    assert.deepEqual((await readPlan()).plan, originalPlan.plan);
+    assert.deepEqual((await readPlan()).brandQuotaUtilization, originalPlan.brandQuotaUtilization);
+    await enabled(submitPlan);
+    await click(submitPlan);
+    await matches(status, pendingLabel);
+    await showShipping(pendingLabel, 200);
+    await matches(overflow, '52 / 45');
+    assert.equal(await evaluate(`document.querySelector('${shippingApprove}').disabled`), true);
+    assert.equal((await api('/plan/approve', 'POST', undefined, 'SHIPPING', 409)).error, 'SHIPPING_CAPACITY_EXCEEDED');
+    await click(shippingReturn);
+    await until(() => exists(shippingDialog + '[open]'), 'Admin-driven overflow return');
+    const adminFlowNote = 'נא לבדוק את המגבלה החדשה בנמל חיפה';
+    await input(shippingDialog + ' textarea', adminFlowNote);
+    await click(shippingDialog + ' button[type=submit]');
+    await matches('.shipping-screen .plan-status', 'הוחזרה לתיקון');
+    await showPlanner('הוחזרה לתיקון');
+    await matches('.returned-note', adminFlowNote);
+    await regenerateInBrowser();
+    await totals(195, 262, 38);
+    const refreshedPlan = await readPlan();
+    assert.deepEqual(refreshedPlan.capacity, { selected: 195, target: 195 });
+    assert.deepEqual(Object.fromEntries(Object.entries(refreshedPlan.brandQuotaUtilization).map(([brand, quota]) => [brand, quota.selected])),
+      { Toyota: 55, Lexus: 36, GAC: 20, Geely: 42, Zeekr: 42 });
+
+    const refreshedMembers = await selectedIds();
+    const geelySummary = `(() => {
+      const row = [...document.querySelectorAll('.quota-item')].find(item => item.querySelector('.quota-name bdi').textContent === 'Geely');
+      return [row?.querySelector('.quota-name span').textContent, row?.querySelector('.utilization-value').textContent.trim()];
+    })()`;
+    await showAdmin();
+    await input('#admin-quota-target-Geely', '17');
+    await input('#admin-quota-type-Geely', 'HARD');
+    await api('/settings', 'PUT', { envelopeRedThresholdDays: 130 }, 'ADMIN');
+    await click(adminSave);
+    await matches('.admin-screen [role=status]', 'ההגדרות נשמרו');
+    await enabled(adminReload);
+    assert.deepEqual(JSON.parse(mutations.filter(({ url }) => url === '/api/settings').at(-1).postData), {
+      brandQuotas: { Geely: { quota_target: 17, quota_type: 'HARD' } },
+    });
+    assert.deepEqual((await adminSettings()).brandQuotas.Geely, { quota_target: 17, quota_type: 'HARD' });
+    assert.equal(await fieldValue(redThreshold), '130', 'save adopts concurrent updates to untouched fields');
+    await showPlanner('הוחזרה לתיקון');
+    await matches('.stat-strip .stat-tile-value[dir=ltr]', '195 / 195');
+    assert.deepEqual(await selectedIds(), refreshedMembers);
+    assert.deepEqual((await readPlan()).plan, refreshedPlan.plan);
+    assert.deepEqual((await readPlan()).brandQuotaUtilization.Geely, { selected: 42, target: 32, type: 'FLEX', overage: 10 });
+    assert.deepEqual(await evaluate(geelySummary), ['גמישה', '42 / 32+10']);
+    await regenerateInBrowser();
+    await until(async () => (await readPlan()).brandQuotaUtilization.Geely.target === 17, 'regenerated current Geely limit');
+    const currentQuota = (await readPlan()).brandQuotaUtilization.Geely;
+    assert.equal(currentQuota.type, 'HARD');
+    assert.ok(currentQuota.selected <= 17);
+    await until(async () => (await evaluate(geelySummary)).join() === `קשיחה,${currentQuota.selected} / 17`, 'visible regenerated Geely quota');
+    console.log('Chrome Admin ⇄ Planner ⇄ Shipping: settings preserve membership and snapshots; live warnings and 52/45 approval block; return, 195 regeneration and subsequent quota regeneration use saved settings.');
+
+    delayAdminRead = true;
+    const delayedAdminOffset = settingsReads.length;
+    await input('#role-select', 'ADMIN');
+    await until(() => settingsReads.slice(delayedAdminOffset).some(({ id, role }) =>
+      role === 'ADMIN' && !cancelledRequestIds.has(id)), 'in-flight Admin settings read');
+    const adminInFlight = settingsReads.slice(delayedAdminOffset).filter(({ id, role }) =>
+      role === 'ADMIN' && !cancelledRequestIds.has(id));
+    await showPlanner('הוחזרה לתיקון');
+    await until(() => adminInFlight.some(({ id }) => cancelledRequestIds.has(id)), 'role switch aborted Admin settings read');
+    delayAdminRead = false;
+    assert.equal(await exists('.admin-screen'), false);
+    await showAdmin();
+    const returnedMembers = await selectedIds();
+    await input(haifaLimit, '65');
+    await click(adminSave);
+    await matches('.admin-screen [role=status]', 'ההגדרות נשמרו');
+    await enabled(adminReload);
+    assert.deepEqual(await selectedIds(), returnedMembers);
+    await showPlanner('הוחזרה לתיקון');
+    await enabled(submitPlan);
+    await click(submitPlan);
+    await matches(status, pendingLabel);
+    await showShipping(pendingLabel, returnedMembers.length);
+    await enabled(shippingApprove);
+    await click(shippingApprove);
+    await matches('.shipping-screen .plan-status', 'אושרה');
+    assert.equal((await readPlan()).plan.status, 'APPROVED');
+    assert.deepEqual(await selectedIds(), returnedMembers);
+    await showPlanner('אושרה');
+    await assertMembershipLocked();
+    console.log('Chrome cross-role completion: Admin restores Haifa capacity, Planner resubmits, Shipping approves, Planner is locked.');
+
+    await showAdmin();
+    for (const field of [yellowThreshold, redThreshold, '#admin-quota-target-GAC', '#admin-shipping-0']) await input(field, '0');
+    await click(adminSave);
+    await matches('.admin-screen [role=status]', 'ההגדרות נשמרו');
+    await enabled(adminReload);
+    const zeroSettings = await adminSettings();
+    assert.equal(zeroSettings.envelopeYellowThresholdDays, 0);
+    assert.equal(zeroSettings.envelopeRedThresholdDays, 0);
+    assert.equal(zeroSettings.brandQuotas.GAC.quota_target, 0);
+    assert.equal(zeroSettings.shippingCapacities['נמל אשדוד'], 0);
+    await setView(390, 844);
+    assert.equal(await evaluate(`(() => {
+      const { clientWidth, scrollWidth } = document.documentElement;
+      window.scrollTo(0, 640);
+      return scrollWidth === clientWidth && window.scrollY > 0;
+    })()`), true);
+    assert.deepEqual(exceptions, []);
+    console.log('Chrome Admin: stale role-specific read cancellation, RTL/LTR and narrow viewport scrolling.');
 
   } finally {
     page?.close();

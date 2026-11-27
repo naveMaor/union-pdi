@@ -317,6 +317,127 @@
   font-size: 1.12rem;
 }
 
+.admin-screen {
+  max-inline-size: 1160px;
+  margin-inline: auto;
+}
+
+.admin-settings-form,
+.admin-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 15px 18px;
+}
+
+.admin-overview h2 {
+  font-size: 1.18rem;
+}
+
+.admin-overview p,
+.admin-panel p {
+  margin-block-start: 4px;
+  color: var(--text-muted);
+  font-size: .875rem;
+}
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.admin-panel {
+  margin: 0;
+  padding: 8px 16px 15px;
+}
+
+.admin-panel legend {
+  padding-inline: 7px;
+  color: var(--navy);
+  font-weight: 750;
+}
+
+.admin-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-block-start: 8px;
+}
+
+.admin-field {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-inline-size: 0;
+  font-size: .875rem;
+}
+
+.admin-field label {
+  color: var(--text-muted);
+}
+
+.admin-field input,
+.admin-field select {
+  min-inline-size: 0;
+  min-block-size: 36px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-control);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.admin-field input {
+  max-inline-size: 8rem;
+}
+
+.admin-field [aria-invalid='true'] {
+  border-color: var(--red);
+}
+
+.admin-field .form-error,
+.admin-feedback[role='alert'] {
+  color: var(--red);
+}
+
+.admin-quota-row {
+  display: grid;
+  grid-template-columns: minmax(0, .7fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  margin-block-start: 8px;
+  padding-block: 8px 2px;
+  border-block-start: 1px solid var(--border);
+}
+
+.admin-quota-brand {
+  justify-self: start;
+  padding-block-start: 22px;
+  font-weight: 700;
+}
+
+.admin-feedback {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--navy);
+}
+
 .recommendation-primary,
 .recommendation-secondary {
   min-block-size: 36px;
@@ -735,6 +856,10 @@
 }
 
 @media (max-width: 640px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-brand {
     margin-inline-start: 0;
   }

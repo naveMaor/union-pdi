@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 
-export function usePlanMutation(setIsMutating, errorMessages) {
+export function usePlanMutation(setIsMutating, errorMessages,
+  fallbackError = 'לא התקבל אישור על שמירת הפעולה. מצב התכנית נטען מחדש.',
+) {
   const [revision, setRevision] = useState(0);
   const [pending, setPending] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -22,7 +24,7 @@ export function usePlanMutation(setIsMutating, errorMessages) {
     } catch (error) {
       setFeedback({
         error: true,
-        text: errorMessages[error.code] ?? 'לא התקבל אישור על שמירת הפעולה. מצב התכנית נטען מחדש.',
+        text: errorMessages[error.code] ?? fallbackError,
       });
     } finally {
       // A failed response may also leave the view out of date.
@@ -33,5 +35,5 @@ export function usePlanMutation(setIsMutating, errorMessages) {
     }
   }
 
-  return { revision, pending, feedback, refresh, mutate };
+  return { revision, pending, feedback, refresh, mutate, clearFeedback: () => setFeedback(null) };
 }

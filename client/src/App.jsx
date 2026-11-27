@@ -3,7 +3,7 @@ import { PLAN_DATE, ROLES, ROLE_LABELS, ROLE_NAMES } from './constants';
 import { formatDate } from './vehicleView';
 import { PlannerScreen } from './screens/PlannerScreen';
 import { ShippingScreen } from './screens/ShippingScreen';
-import { ComingSoonScreen } from './screens/ComingSoonScreen';
+import { AdminScreen } from './screens/AdminScreen';
 import './App.css';
 
 function App() {
@@ -38,7 +38,7 @@ function App() {
           <PlannerScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />
         ) : role === 'SHIPPING' ? (
           <ShippingScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />
-        ) : <ComingSoonScreen role={role} />}
+        ) : <AdminScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />}
       </main>
     </div>
   );

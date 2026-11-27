@@ -68,4 +68,5 @@ export const api = {
   getVehicles: (role, params, { signal } = {}) =>
     request(`/vehicles${toQueryString(params)}`, { role, signal }),
   getSettings: (role, { signal } = {}) => request('/settings', { role, signal }),
+  updateSettings: (role, body) => request('/settings', { method: 'PUT', role, body }),
 };
