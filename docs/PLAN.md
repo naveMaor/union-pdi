@@ -768,12 +768,51 @@ Browser evidence [Submission with overflow](design/task-5b3-submission.png) ·
 [RETURNED](design/task-5b3-returned.png)
 
 ### Task 6 — Shipping and Admin Frontends
-Status: NOT STARTED
+Status: IN PROGRESS — Steps 6.1–6.4 complete and accepted, including both backend validation fixes and all four Shipping captures. Steps 6.5–6.8 remain pending.
 
-- Shipping approval screen
-- Admin settings screen
-- Demo role selector
-- Error and validation feedback
+#### Step 6.1 — Shipping/Admin API contract verification
+- [x] Verify `GET /api/plan`, `GET /api/settings`, the Admin-only `PUT /api/settings`, and the Shipping-only approval and return transitions against isolated PostgreSQL. Approval uses a bodyless `POST /api/plan/approve`. Return uses `POST /api/plan/return` with a nonblank string `comment`. Both writes return `{ plan }`.
+- [x] Correct both malformed-input gaps found by the probe. Missing, non-string or blank return comments receive `400 COMMENT_REQUIRED`. A null, scalar or array `shippingCapacities` receives `400 INVALID_SETTING_VALUE`. Existing role and lifecycle guards, valid notes and valid partial settings updates retain their behavior.
+
+#### Step 6.2 — Shipping read-only plan review
+- [x] Activate the simulated Shipping user יוסי כהן with `x-demo-role: SHIPPING`. For PENDING_SHIPPING and APPROVED, show selected vehicles, blocker warnings and live limits for all four sources. Show status and applicable messages for a missing plan, DRAFT and RETURNED.
+
+#### Step 6.3 — Shipping approval and return workflows
+- [x] Approve pending plans within live shipping limits. Return pending plans through a keyboard-accessible dialog with a required note. Refresh after writes and report server rejections in Hebrew. Keep post-submission blockers as warnings.
+
+#### Step 6.4 — Shipping integration and acceptance
+- [x] Extend the retained Chrome verifier and run the Shipping acceptance matrix below. Use the Admin API for test setup.
+
+| Case | Browser verification | Direct API or persistence verification |
+| --- | --- | --- |
+| SPEC §14 baseline and locking | Planner generates and submits 200 vehicles. Shipping approves the read-only plan. Planner membership controls stay locked. | APPROVED persists on reload. Role guards reject out-of-role writes. |
+| SPEC §14 scenario 9 | Haifa 52/45 blocks approval after refresh. The return dialog rejects whitespace, supports Escape and submits a valid note. Planner sees the note, excludes a vehicle and resubmits 199. | Stale approval and direct approval return `SHIPPING_CAPACITY_EXCEEDED`. Omitted and whitespace notes return `COMMENT_REQUIRED`. Admin settings changes preserve membership. |
+| SPEC §§8.1 and 9 | A blocker added after submission appears in the summary and vehicle row. Shipping can still approve. | The blocker write preserves status and membership. The approval audit identifies the Shipping demo user. |
+| Lifecycle and interaction | No-plan, DRAFT, RETURNED and APPROVED states. Duplicate and conflicting actions, network failure feedback, stale status refresh and role-switch request cancellation. Keyboard dialog, RTL/LTR, sticky desktop table and narrow viewport scrolling. | A competing return makes stale approval fail. The client refreshes to the persisted status. |
+| Malformed API inputs | Shipping dialog requires a nonblank note and submits a string. | Route regressions verify both HTTP 400 error codes, unchanged plan, membership, settings and audit rows after each rejection, and successful valid return, resubmission and partial settings update. |
+
+Use the Chrome and PostgreSQL setup documented in Task 5. From the repository root, run `node client/scripts/verify-batch-b2.cjs` for all retained Planner and Shipping checks. Add `--shipping-screenshots` to refresh the four Shipping captures or `--screenshots` to refresh every retained capture. The verifier uses a disposable CSV-seeded database and compares fingerprints of all eight development tables.
+
+Frontend build and lint, all 96 backend tests, and the complete retained headless Chrome verifier passed after the validation fixes. The Validator also passed all 12 focused route tests. The backend suite and Chrome used disposable databases, and all eight development-table fingerprints and the original seed matched before and after verification. The approved screenshots were preserved. Admin coverage used the API for test setup and contract checks. Browser coverage used headless Chrome.
+
+Shipping browser evidence
+
+- [Pending approval](design/task-6a-pending-approval.png)
+- [Shipping overflow](design/task-6a-shipping-overflow.png)
+- [Return dialog](design/task-6a-return-dialog.png)
+- [Approved](design/task-6a-approved.png)
+
+#### Step 6.5 — Admin settings screen
+- [ ] Implement the Admin settings screen.
+
+#### Step 6.6 — Settings validation and persistence
+- [ ] Verify Admin settings validation and persistence.
+
+#### Step 6.7 — Snapshot versus live settings behavior
+- [ ] Verify how plan snapshots and live settings are displayed across roles.
+
+#### Step 6.8 — Cross-role integration and Task 6 acceptance
+- [ ] Complete cross-role integration and human acceptance of Task 6.
 
 ### Task 7 — QA and Deployment
 Status: NOT STARTED

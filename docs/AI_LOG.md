@@ -261,3 +261,21 @@ The human accepted Steps 5.8–5.9 and the complete Task 5 Planner frontend,
 including the verification results and four Batch B3 captures. The human
 approved separate local commits for the implementation and acceptance
 evidence. Shipping and Admin frontend acceptance remains in Task 6.
+
+## Task 6 Batch A Shipping frontend
+
+Codex began at the accepted Task 5 checkpoint `16fb13f`. Before changing the frontend, a one-off HTTP probe against fresh Fastify and CSV-seeded PostgreSQL verified the Shipping plan read, settings read, Admin partial settings update, role guards, bodyless approval and return with a string comment. It confirmed that the approval endpoint checks current limits and allows approval with a post-submission blocker. Two malformed inputs produced `500 INTERNAL_ERROR`: a numeric return comment and a null `shippingCapacities` map. The Shipping form submits a trimmed, nonblank string. Backend changes require separate approval.
+
+- Activated the SHIPPING demo role for יוסי כהן and built a read-only Design B review. The view reuses the live capacity panel, blocker warnings, dialog, API resources and mutation guard. Pending plans can be approved within the live limits or returned with a note. Approved plans remain viewable, and DRAFT and RETURNED states direct Shipping to wait for submission. Admin remains a placeholder.
+- Extended the retained Chrome DevTools verifier. Browser interactions covered Planner generation and submission, baseline Shipping approval, read-only membership, a selected blocker warning during approval, live Haifa 52/45 settings, direct overflow enforcement, invalid and valid return comments, Planner editing and resubmission, stale writes, duplicate and conflicting actions, role-switch request cancellation, reload, keyboard dialog behavior and responsive layout. An initial run exposed a verifier timing issue while switching roles after reload. The test now waits for the enabled role selector.
+- The full retained Planner and Shipping headless Chrome run, frontend build and lint, and all 94 backend tests passed. The HTTP probe and Chrome run deleted their disposable databases and matched before-and-after fingerprints of all eight development tables. The source CSV was preserved. Four 1920 × 1080 Shipping screenshots and the acceptance matrix are linked from [the Task 6 plan](PLAN.md#task-6--shipping-and-admin-frontends). Steps 6.1–6.4 are ready for human review. Steps 6.5–6.8 remain pending.
+
+### Shipping Batch A validation follow-up
+
+The human accepted the Shipping frontend, four captures and verification, and authorized the two backend fixes before committing. The return service now checks that the comment is a string before trimming for validation and keeps valid text unchanged for persistence. The settings service checks that a supplied `shippingCapacities` is an object before validating source names and capacity values. Both reuse the existing domain errors and HTTP 400 mappings. Role checks still run first.
+
+The Validator independently reviewed the service guards against SPEC §§5.2, 5.3 and 8.1, added two route regressions, and ran the focused suite against disposable PostgreSQL. All 12 tests passed. The regressions compare plan state, membership, settings and audit records after every rejected input and verify valid returns, resubmission and partial shipping-capacity updates.
+
+The full backend suite passed 96/96. Frontend build and lint and the retained headless Chrome verifier passed, including Shipping approval, overflow, required-note validation, return and resubmission. Read-only checks confirmed that all eight development-table fingerprints matched after the backend suite and again after Chrome. The original seed CSV matched the tracked file byte for byte. Chrome ran without capture flags to preserve the four approved images. The pre-commit review checked the proposed paths, whitespace, credential patterns and evidence links. Nothing was staged.
+
+The human granted final acceptance for Steps 6.1–6.4, including both backend validation fixes, and approved three local commits for API validation, the Shipping frontend and verifier, and documentation with the four approved captures. Shipping was verified through the UI. Admin verification used the API only. Steps 6.5–6.8 remain pending.
