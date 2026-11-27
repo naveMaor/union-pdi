@@ -845,14 +845,41 @@ Admin browser evidence
 - [Saved changes](design/task-6b-admin-saved-changes.png)
 
 ### Task 7 — QA and Deployment
-Status: NOT STARTED
+Status: IN PROGRESS
 
-- Automated acceptance tests
-- Persistence testing
-- Public deployment
-- README documentation
-- AI workflow documentation
-- Live-change rehearsal
+#### Step 7.1 — SPEC compliance and acceptance audit
+- [ ] Independently audit SPEC §§4-15 and all 12 acceptance scenarios
+  against the actual implementation and retained tests
+
+#### Step 7.2 — Code quality, security and release readiness
+- [ ] Independent release audit: reproducibility, security, configuration,
+  documentation and deployment gaps; review lint suppressions, Chrome-only
+  coverage and the retained browser verifier
+
+#### Step 7.3 — Repository cleanup and reproducible installation
+- [ ] Address Batch 7A findings classified as release blockers
+
+#### Step 7.4 — Final README and AI documentation
+- [ ] Complete README (install/run/test/design decisions) and SPEC §11 AI
+  section
+
+#### Step 7.5 — Deployment architecture and hosting selection
+- [ ] Choose a hosting approach for the app and PostgreSQL
+
+#### Step 7.6 — Deployment
+- [ ] Deploy to the chosen public host
+
+#### Step 7.7 — Deployed application acceptance
+- [ ] Verify the live deployment against SPEC §14
+
+#### Step 7.8 — Demonstration and interview preparation
+- [ ] Prepare for the live 60-minute presentation (SPEC §13)
+
+#### Step 7.9 — Final submission review
+- [ ] Final check of repo, README, links before submission
+
+Acceptance: deployed, tested application matching SPEC §14; complete README
+and AI documentation; reproducible local setup.
 
 ## Development Rules
 
