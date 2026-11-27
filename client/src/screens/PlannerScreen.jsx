@@ -16,6 +16,8 @@ const MUTATION_ERRORS = {
   CONFIRMATION_REQUIRED: 'כבר קיימת תכנית לתאריך זה. מצב התכנית נטען מחדש.',
   PLAN_LOCKED: 'התכנית נעולה לעריכה. מצב התכנית נטען מחדש.',
   PLAN_NOT_FOUND: 'התכנית אינה זמינה. מצב התכנית נטען מחדש.',
+  EMPTY_PLAN: 'לא ניתן לשלוח תכנית ריקה.',
+  INELIGIBLE_VEHICLES_IN_PLAN: 'יש לטפל ברכבים לא זכאים בתכנית לפני השליחה.',
   STALE_SUGGESTION: 'החלופה השתנתה או אינה זמינה. יש לבדוק את ההצעה העדכנית לפני אישור נוסף.',
   VEHICLE_NOT_IN_PLAN: 'הרכב כבר אינו בתכנית.',
   ALREADY_EXCLUDED: 'הרכב כבר הוצא מהתכנית.',
@@ -27,6 +29,14 @@ const MUTATION_ERRORS = {
   INVALID_BLOCKER_CODE: 'סוג החסם אינו תקין.',
   FORBIDDEN_ROLE: 'התפקיד הנוכחי אינו מורשה לבצע את הפעולה.',
 };
+
+function submissionIssue(selected) {
+  if (selected.length === 0) return MUTATION_ERRORS.EMPTY_PLAN;
+  if (selected.some((vehicle) => !vehicle.customs_released || vehicle.active_blocker !== 'NONE')) {
+    return MUTATION_ERRORS.INELIGIBLE_VEHICLES_IN_PLAN;
+  }
+  return null;
+}
 
 export function PlannerScreen({ role, isMutating, setIsMutating }) {
   const [revision, setRevision] = useState(0);
@@ -46,6 +56,8 @@ export function PlannerScreen({ role, isMutating, setIsMutating }) {
   const editable = plan?.status === 'DRAFT' || plan?.status === 'RETURNED';
   const locked = plan?.status === 'PENDING_SHIPPING' || plan?.status === 'APPROVED';
   const actionsDisabled = isMutating || planState.loading;
+  // The summary contains every selected vehicle, regardless of the table filters.
+  const submitReason = editable ? submissionIssue(planState.data.selected) : null;
 
   function refresh() {
     setRevision((value) => value + 1);
@@ -100,6 +112,23 @@ export function PlannerScreen({ role, isMutating, setIsMutating }) {
                   () => api.generatePlan(role, { confirm }), 'מריצה המלצה…', 'ההמלצה נשמרה.',
                 )}
               />
+              {editable && (
+                <>
+                  {submitReason && <p id="submit-plan-reason">{submitReason}</p>}
+                  <button
+                    id="submit-plan"
+                    className="recommendation-primary"
+                    type="button"
+                    disabled={actionsDisabled || Boolean(submitReason)}
+                    aria-describedby={submitReason ? 'submit-plan-reason' : undefined}
+                    onClick={() => mutate(
+                      () => api.submitForShipping(role), 'שולחת לאישור שילוח…', 'התכנית נשלחה לאישור שילוח.',
+                    )}
+                  >
+                    שליחה לאישור שילוח
+                  </button>
+                </>
+              )}
             </div>
           }
         />
