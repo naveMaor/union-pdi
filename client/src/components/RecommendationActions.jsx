@@ -1,49 +1,16 @@
-import { useRef, useState } from 'react';
-import { api } from '../api/client';
+import { useRef } from 'react';
+import { PlannerDialog } from './PlannerDialog';
 
-const GENERATION_ERRORS = {
-  CONFIRMATION_REQUIRED: 'כבר קיימת תכנית לתאריך זה. מצב התכנית נטען מחדש.',
-  PLAN_LOCKED: 'התכנית נעולה להרצה מחדש.',
-};
-
-export function RecommendationActions({ role, planState, isGenerating, setIsGenerating, onRefresh }) {
-  const [feedback, setFeedback] = useState(null);
-  const requestInFlight = useRef(false);
+export function RecommendationActions({ plan, editable, disabled, onGenerate }) {
   const dialog = useRef(null);
   const cancelButton = useRef(null);
-  const plan = planState.data?.plan;
-  const editable = plan?.status === 'DRAFT' || plan?.status === 'RETURNED';
-  const canGenerate = !isGenerating && !planState.loading && !planState.error && (plan === null || editable);
-
-  async function generate(confirm) {
-    if (!canGenerate || requestInFlight.current) return;
-
-    requestInFlight.current = true;
-    setIsGenerating(true);
-    setFeedback(null);
-    try {
-      await api.generatePlan(role, { confirm });
-      setFeedback({ text: 'ההמלצה נשמרה.' });
-    } catch (error) {
-      setFeedback({
-        error: true,
-        text: GENERATION_ERRORS[error.code] ?? 'לא התקבל אישור על שמירת ההמלצה. מצב התכנית נטען מחדש.',
-      });
-    } finally {
-      // A failed or interrupted response can also leave the displayed plan stale.
-      onRefresh();
-      requestInFlight.current = false;
-      setIsGenerating(false);
-    }
-  }
 
   function handleAction() {
-    if (!canGenerate || requestInFlight.current) return;
+    if (disabled) return;
     if (!editable) {
-      void generate(false);
+      onGenerate(false);
       return;
     }
-    setFeedback(null);
     dialog.current.showModal();
     cancelButton.current.focus();
   }
@@ -51,34 +18,22 @@ export function RecommendationActions({ role, planState, isGenerating, setIsGene
   function confirmRegeneration() {
     if (!dialog.current.open) return;
     dialog.current.close();
-    if (editable) void generate(true);
+    if (editable && !disabled) onGenerate(true);
   }
 
+  if (plan && !editable) return null;
+
   return (
-    <div className="planner-actions">
-      {feedback && <p role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
-      {isGenerating && <span role="status">מריצה המלצה…</span>}
-      {(plan == null || editable) && (
-        <button
-          className="recommendation-primary"
-          disabled={!canGenerate}
-          type="button"
-          onClick={handleAction}
-        >
-          {editable ? 'הרצת המלצה מחדש' : 'יצירת המלצה'}
-        </button>
-      )}
-      <dialog
-        className="recommendation-dialog"
-        ref={dialog}
-        aria-labelledby="recommendation-title"
-        aria-describedby="recommendation-description"
+    <>
+      <button className="recommendation-primary" disabled={disabled} type="button" onClick={handleAction}>
+        {editable ? 'הרצת המלצה מחדש' : 'יצירת המלצה'}
+      </button>
+      <PlannerDialog
+        name="recommendation"
+        dialogRef={dialog}
+        title="הרצת המלצה מחדש"
+        description="ההמלצה תחושב מחדש לפי הגדרות התכנון והחסמים העדכניים. הוצאות ידניות פעילות יישמרו, והוספות ידניות יימחקו."
       >
-        <h2 id="recommendation-title">הרצת המלצה מחדש</h2>
-        <p id="recommendation-description">
-          ההמלצה תחושב מחדש לפי הגדרות התכנון והחסמים העדכניים.
-          הוצאות ידניות פעילות יישמרו, והוספות ידניות יימחקו.
-        </p>
         <div className="recommendation-dialog-actions">
           <button ref={cancelButton} className="recommendation-secondary" type="button" onClick={() => dialog.current.close()}>
             ביטול
@@ -87,7 +42,7 @@ export function RecommendationActions({ role, planState, isGenerating, setIsGene
             אישור הרצה מחדש
           </button>
         </div>
-      </dialog>
-    </div>
+      </PlannerDialog>
+    </>
   );
 }

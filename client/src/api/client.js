@@ -49,6 +49,19 @@ export const api = {
   getPlan: (role, { signal } = {}) => request('/plan', { role, signal }),
   generatePlan: (role, { confirm = false } = {}) =>
     request('/plan/generate', { method: 'POST', role, body: confirm ? { confirm: true } : undefined }),
+  excludeVehicle: (role, vehicleId, body) =>
+    request(`/plan/vehicles/${encodeURIComponent(vehicleId)}/exclude`, { method: 'POST', role, body }),
+  cancelExclusion: (role, vehicleId) =>
+    request(`/plan/vehicles/${encodeURIComponent(vehicleId)}/cancel-exclusion`, { method: 'POST', role }),
+  getReplacement: (role, { signal } = {}) => request('/plan/replacement', { role, signal }),
+  confirmReplacement: (role, vehicleId) =>
+    request('/plan/replacement/confirm', { method: 'POST', role, body: { vehicleId } }),
+  addBlocker: (role, vehicleId, blockerCode) =>
+    request(`/vehicles/${encodeURIComponent(vehicleId)}/blocker`, {
+      method: 'POST', role, body: { blockerCode },
+    }),
+  removeBlocker: (role, vehicleId) =>
+    request(`/vehicles/${encodeURIComponent(vehicleId)}/blocker`, { method: 'DELETE', role }),
   getVehicles: (role, params, { signal } = {}) =>
     request(`/vehicles${toQueryString(params)}`, { role, signal }),
   getSettings: (role, { signal } = {}) => request('/settings', { role, signal }),

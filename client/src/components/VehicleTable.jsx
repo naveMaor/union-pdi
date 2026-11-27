@@ -62,7 +62,7 @@ function EnvelopeAge({ date, settings }) {
   );
 }
 
-export function VehicleTable({ vehicles, sortByEnvelopeDate, settings }) {
+export function VehicleTable({ vehicles, sortByEnvelopeDate, settings, actionsDisabled, onVehicleAction }) {
   return (
     <>
       {vehicles.length > 0 ? (
@@ -112,7 +112,19 @@ export function VehicleTable({ vehicles, sortByEnvelopeDate, settings }) {
                       ) : '—'}
                     </td>
                     <td className="plan-state-column">
-                      {statusCell(vehicle)}
+                      <div className="vehicle-state-actions">
+                        {statusCell(vehicle)}
+                        <button
+                          className="vehicle-row-action"
+                          type="button"
+                          aria-haspopup="dialog"
+                          aria-label={`פעולות עבור ${vehicle.vehicle_id}`}
+                          disabled={actionsDisabled}
+                          onClick={() => onVehicleAction(vehicle)}
+                        >
+                          פעולות
+                        </button>
+                      </div>
                       {vehicle.inPlan && hasBlocker && <span className="member-warning">חסם פעיל בתכנית</span>}
                       {exclusionDetail(vehicle.exclusion)}
                     </td>

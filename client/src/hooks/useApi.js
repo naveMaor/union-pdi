@@ -9,6 +9,10 @@ export function useSettings(role, revision) {
   return useApiResource((signal) => api.getSettings(role, { signal }), [role, revision]);
 }
 
+export function useReplacement(role, revision) {
+  return useApiResource((signal) => api.getReplacement(role, { signal }), [role, revision]);
+}
+
 export function useVehicles(role, params, revision) {
   const key = JSON.stringify(params);
   return useApiResource((signal) => api.getVehicles(role, params, { signal }), [role, key, revision]);

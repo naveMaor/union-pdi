@@ -7,7 +7,7 @@ import './App.css';
 
 function App() {
   const [role, setRole] = useState('PLANNER');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isMutating, setIsMutating] = useState(false);
 
   return (
     <div className={role === 'PLANNER' ? 'app app-planner' : 'app'}>
@@ -18,7 +18,7 @@ function App() {
         </p>
         <div className="role-switcher">
           <label htmlFor="role-select">תפקיד</label>
-          <select id="role-select" aria-describedby="role-disclaimer" value={role} disabled={isGenerating} onChange={(e) => setRole(e.target.value)}>
+          <select id="role-select" aria-describedby="role-disclaimer" value={role} disabled={isMutating} onChange={(e) => setRole(e.target.value)}>
             {ROLES.map((roleCode) => (
               <option key={roleCode} value={roleCode}>
                 {ROLE_NAMES[roleCode]} · {ROLE_LABELS[roleCode]}
@@ -34,7 +34,7 @@ function App() {
 
       <main>
         {role === 'PLANNER' ? (
-          <PlannerScreen role={role} isGenerating={isGenerating} setIsGenerating={setIsGenerating} />
+          <PlannerScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />
         ) : <ComingSoonScreen role={role} />}
       </main>
     </div>

@@ -51,3 +51,11 @@ export const PLAN_STATUS_LABELS = {
   APPROVED: 'אושרה',
   RETURNED: 'הוחזרה לתיקון',
 };
+
+export const BLOCKER_LABELS = {
+  RECALL: 'קריאה לתיקון',
+  WORK_STOP: 'עצירת עבודה',
+  MISSING_ACCESSORY: 'חוסר אביזר',
+  DAMAGE: 'נזק',
+  ZERO_KM_STOP: 'עצירת אפס קילומטר',
+};
