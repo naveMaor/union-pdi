@@ -9,6 +9,16 @@ import './App.css';
 function App() {
   const [role, setRole] = useState('PLANNER');
   const [isMutating, setIsMutating] = useState(false);
+  // Hidden by default; toggled only via the PDI badge below, only while in
+  // Admin mode. Reset on every role change (adjusted during render, not an
+  // effect, per React's "you might not need an effect" guidance) so
+  // re-entering Admin always starts collapsed again — never persisted.
+  const [showDemoReset, setShowDemoReset] = useState(false);
+  const [showDemoResetForRole, setShowDemoResetForRole] = useState(role);
+  if (role !== showDemoResetForRole) {
+    setShowDemoResetForRole(role);
+    setShowDemoReset(false);
+  }
 
   return (
     <div className={`app app-${role.toLowerCase()}`}>
@@ -30,7 +40,15 @@ function App() {
         <p className="role-disclaimer" id="role-disclaimer">
           הדמיית תפקידים לצורך המטלה בלבד. אינה מנגנון אבטחה.
         </p>
-        <div className="app-brand"><bdi dir="ltr">UNION MOTORS <span>PDI</span></bdi></div>
+        <div className="app-brand">
+          <bdi dir="ltr">
+            UNION MOTORS{' '}
+            <button type="button" id="pdi-badge-toggle" className="pdi-badge"
+              disabled={role !== 'ADMIN'} aria-pressed={showDemoReset}
+              aria-label="הצגה או הסתרה של איפוס סביבת הדגמה (זמין במצב מנהל מערכת בלבד)"
+              onClick={() => setShowDemoReset((value) => !value)}>PDI</button>
+          </bdi>
+        </div>
       </header>
 
       <main>
@@ -38,7 +56,8 @@ function App() {
           <PlannerScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />
         ) : role === 'SHIPPING' ? (
           <ShippingScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />
-        ) : <AdminScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />}
+        ) : <AdminScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating}
+              showDemoReset={showDemoReset} />}
       </main>
     </div>
   );

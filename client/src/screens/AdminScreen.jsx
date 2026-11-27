@@ -23,6 +23,20 @@ const ADMIN_ERRORS = {
   FORBIDDEN_ROLE: 'לתפקיד הנוכחי אין הרשאה לשמור הגדרות.',
 };
 
+// Demo-only, off-by-default feature (see README.md "Demo Reset"). Restores
+// the original 300-vehicle dataset, settings and a null-plan state — never a
+// security mechanism, documented transparently as a demo convenience.
+const RESET_CONFIRM_PHRASE = 'איפוס נתוני דמו';
+const RESET_ERRORS = {
+  FORBIDDEN_ROLE: 'לתפקיד הנוכחי אין הרשאה לאפס נתוני דמו.',
+  INVALID_RESET_TOKEN: 'סיסמת האיפוס שגויה או חסרה.',
+  TOO_MANY_ATTEMPTS: 'יותר מדי ניסיונות שגויים. יש לנסות שוב מאוחר יותר.',
+  RESET_RATE_LIMITED: 'בוצע איפוס נתוני דמו לאחרונה. יש לנסות שוב בעוד דקה.',
+  CONFIRMATION_REQUIRED: 'יש לאשר את פעולת האיפוס.',
+  RESET_IN_PROGRESS: 'איפוס נתוני דמו אחר כבר רץ כעת.',
+  'Not Found': 'תכונת איפוס נתוני הדמו אינה זמינה בסביבה זו.',
+};
+
 function buildUpdate(settings, edits) {
   const patch = {};
   const errors = {};
@@ -74,7 +88,7 @@ function NumberField({ field, label = field.label, value, error, onChange }) {
   );
 }
 
-export function AdminScreen({ role, isMutating, setIsMutating }) {
+export function AdminScreen({ role, isMutating, setIsMutating, showDemoReset }) {
   const { revision, pending, feedback, refresh, mutate, clearFeedback } = usePlanMutation(
     setIsMutating, ADMIN_ERRORS, 'לא התקבל אישור על שמירת ההגדרות. ההגדרות מהשרת נטענות מחדש.',
   );
@@ -83,6 +97,48 @@ export function AdminScreen({ role, isMutating, setIsMutating }) {
   const [errors, setErrors] = useState({});
   const discardDialog = useRef(null);
   const cancelDiscard = useRef(null);
+
+  const resetMutation = usePlanMutation(
+    setIsMutating, RESET_ERRORS, 'לא התקבל אישור על איפוס נתוני הדמו.',
+  );
+  const [resetToken, setResetToken] = useState('');
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const resetDialog = useRef(null);
+  const cancelReset = useRef(null);
+  const resetReady = resetToken.length > 0 && resetConfirmText === RESET_CONFIRM_PHRASE;
+
+  // Hiding via the PDI badge (App.jsx) clears both fields immediately —
+  // never left sitting in memory once the section is collapsed. Adjusted
+  // during render, not an effect, per React's "you might not need an
+  // effect" guidance.
+  const [clearedForShowDemoReset, setClearedForShowDemoReset] = useState(showDemoReset);
+  if (showDemoReset !== clearedForShowDemoReset) {
+    setClearedForShowDemoReset(showDemoReset);
+    if (!showDemoReset) {
+      setResetToken('');
+      setResetConfirmText('');
+    }
+  }
+
+  function openResetDialog(event) {
+    event.preventDefault();
+    if (!resetReady || isMutating) return;
+    resetDialog.current.showModal();
+    cancelReset.current.focus();
+  }
+
+  function runReset() {
+    resetDialog.current.close();
+    const token = resetToken;
+    // Cleared immediately, win or lose — never kept around longer than the
+    // one request that uses it, never written to localStorage/sessionStorage.
+    setResetToken('');
+    setResetConfirmText('');
+    void resetMutation.mutate(async () => {
+      await api.demoReset(role, token);
+      refresh(); // reloads this screen's settings; Planner/Shipping screens refetch on their own next read
+    }, 'מאפס נתוני דמו…', 'נתוני הדמו אופסו למצב המקורי.');
+  }
   const dirty = Object.keys(edits).length > 0;
   const hasErrors = Object.keys(errors).length > 0;
   const busy = loading || isMutating;
@@ -210,6 +266,34 @@ export function AdminScreen({ role, isMutating, setIsMutating }) {
         )}
       </form>
 
+      {showDemoReset && (
+        <form className="admin-danger-zone panel" noValidate onSubmit={openResetDialog} aria-busy={isMutating}>
+          <h2>איפוס סביבת ההדגמה</h2>
+          <p>שחזור 300 הרכבים והגדרות המערכת למצבם המקורי.</p>
+          <p className="admin-danger-warning">
+            <strong>פעולה זו תמחק את כל התכניות והשינויים שבוצעו במערכת. לא ניתן לבטל את הפעולה.</strong>
+          </p>
+          <div className="admin-field">
+            <label htmlFor="admin-reset-token">סיסמת איפוס</label>
+            <input id="admin-reset-token" type="password" autoComplete="off" dir="ltr"
+              value={resetToken} onChange={(event) => setResetToken(event.target.value)} />
+          </div>
+          <div className="admin-field">
+            <label htmlFor="admin-reset-confirm">{`לאישור הפעולה, יש להקליד '${RESET_CONFIRM_PHRASE}'`}</label>
+            <input id="admin-reset-confirm" type="text" autoComplete="off"
+              value={resetConfirmText} onChange={(event) => setResetConfirmText(event.target.value)} />
+          </div>
+          {resetMutation.pending && <p className="admin-feedback" role="status">{resetMutation.pending}</p>}
+          {resetMutation.feedback && (
+            <p className="admin-feedback" role={resetMutation.feedback.error ? 'alert' : 'status'}>
+              {resetMutation.feedback.text}
+            </p>
+          )}
+          <button id="admin-reset-open" className="recommendation-danger" type="submit"
+            disabled={isMutating || !resetReady}>איפוס סביבת ההדגמה</button>
+        </form>
+      )}
+
       <PlannerDialog name="admin-discard" dialogRef={discardDialog} title="טעינה מחדש של ההגדרות"
         description="השינויים שלא נשמרו יבוטלו וההגדרות העדכניות ייטענו מהשרת.">
         <div className="recommendation-dialog-actions">
@@ -217,6 +301,16 @@ export function AdminScreen({ role, isMutating, setIsMutating }) {
             onClick={() => discardDialog.current.close()}>ביטול</button>
           <button id="admin-confirm-reload" className="recommendation-primary" type="button"
             onClick={discardAndReload}>ביטול שינויים וטעינה</button>
+        </div>
+      </PlannerDialog>
+
+      <PlannerDialog name="admin-reset" dialogRef={resetDialog} title="אישור איפוס סביבת ההדגמה"
+        description="פעולה זו תמחק את כל התכניות והשינויים שבוצעו במערכת. לא ניתן לבטל את הפעולה.">
+        <div className="recommendation-dialog-actions">
+          <button ref={cancelReset} className="recommendation-secondary" type="button"
+            onClick={() => resetDialog.current.close()}>ביטול</button>
+          <button id="admin-confirm-reset" className="recommendation-danger" type="button"
+            onClick={runReset}>כן, אפס את סביבת ההדגמה</button>
         </div>
       </PlannerDialog>
     </section>

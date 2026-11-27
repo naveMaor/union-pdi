@@ -38,13 +38,30 @@
   letter-spacing: .04em;
 }
 
-.app-brand span {
+.app-brand .pdi-badge {
   margin-inline-start: 6px;
   padding: 3px 7px;
+  border: none;
   border-radius: 4px;
   color: white;
   background: var(--navy);
   font-size: .83rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+
+.app-brand .pdi-badge:disabled {
+  cursor: default;
+}
+
+.app-brand .pdi-badge:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.app-brand .pdi-badge[aria-pressed='true'] {
+  background: var(--red);
 }
 
 .role-switcher {
@@ -470,6 +487,55 @@
 
 .recommendation-secondary:hover {
   background: var(--blue-tint);
+}
+
+.recommendation-danger {
+  min-block-size: 36px;
+  padding: 5px 12px;
+  border: 1px solid var(--red);
+  border-radius: 5px;
+  font-weight: 700;
+  background: var(--red-tint);
+  color: var(--red);
+}
+
+.recommendation-danger:hover:not(:disabled) {
+  background: var(--red);
+  color: #fff;
+}
+
+.recommendation-danger:disabled {
+  background: #edf1f5;
+  border-color: var(--border-control);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.admin-danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-inline-size: 26rem;
+  margin-block-start: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.admin-danger-zone h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--red);
+}
+
+.admin-danger-zone p {
+  margin: 0;
+  font-size: .875rem;
+}
+
+.admin-danger-warning {
+  color: var(--red);
 }
 
 .planner-dialog {

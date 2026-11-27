@@ -8,8 +8,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', role, body, signal } = {}) {
-  const headers = { 'x-demo-role': role };
+async function request(path, { method = 'GET', role, body, signal, headers: extraHeaders } = {}) {
+  const headers = { 'x-demo-role': role, ...extraHeaders };
   // Only set Content-Type when there's an actual body — Fastify's JSON parser
   // rejects a request that declares application/json but sends no body.
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -69,4 +69,11 @@ export const api = {
     request(`/vehicles${toQueryString(params)}`, { role, signal }),
   getSettings: (role, { signal } = {}) => request('/settings', { role, signal }),
   updateSettings: (role, body) => request('/settings', { method: 'PUT', role, body }),
+  demoReset: (role, token) =>
+    request('/demo/reset', {
+      method: 'POST',
+      role,
+      body: { confirm: 'RESET_DEMO_DATA' },
+      headers: { 'x-demo-reset-token': token },
+    }),
 };
