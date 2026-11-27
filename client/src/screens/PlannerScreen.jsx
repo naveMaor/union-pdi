@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/client';
 import { usePlanSummary, useSettings, useVehicles, useAllVehicles } from '../hooks/useApi';
+import { usePlanMutation } from '../hooks/usePlanMutation';
 import { PlanSummaryPanel } from '../components/PlanSummaryPanel';
 import { VehicleFilters } from '../components/VehicleFilters';
 import { VehicleTable } from '../components/VehicleTable';
@@ -39,12 +40,9 @@ function submissionIssue(selected) {
 }
 
 export function PlannerScreen({ role, isMutating, setIsMutating }) {
-  const [revision, setRevision] = useState(0);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [selectedVehicle, setSelectedVehicle] = useState(null);
-  const [pending, setPending] = useState(null);
-  const [feedback, setFeedback] = useState(null);
-  const mutationInFlight = useRef(false);
+  const { revision, pending, feedback, refresh, mutate } = usePlanMutation(setIsMutating, MUTATION_ERRORS);
   const planState = usePlanSummary(role, revision);
   const settingsState = useSettings(role, revision);
   const allVehiclesState = useAllVehicles(role, revision);
@@ -58,33 +56,6 @@ export function PlannerScreen({ role, isMutating, setIsMutating }) {
   const actionsDisabled = isMutating || planState.loading;
   // The summary contains every selected vehicle, regardless of the table filters.
   const submitReason = editable ? submissionIssue(planState.data.selected) : null;
-
-  function refresh() {
-    setRevision((value) => value + 1);
-  }
-
-  async function mutate(request, pendingMessage, successMessage) {
-    if (mutationInFlight.current) return;
-    mutationInFlight.current = true;
-    setIsMutating(true);
-    setPending(pendingMessage);
-    setFeedback(null);
-    try {
-      await request();
-      setFeedback({ text: successMessage });
-    } catch (error) {
-      setFeedback({
-        error: true,
-        text: MUTATION_ERRORS[error.code] ?? 'לא התקבל אישור על שמירת הפעולה. מצב התכנית נטען מחדש.',
-      });
-    } finally {
-      // A failed response may also leave the view out of date.
-      refresh();
-      mutationInFlight.current = false;
-      setPending(null);
-      setIsMutating(false);
-    }
-  }
 
   return (
     <div className="planner-screen">

@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const captureScreenshots = process.argv.includes('--screenshots');
 const captureB3Screenshots = captureScreenshots || process.argv.includes('--b3-screenshots');
+const captureShippingScreenshots = captureScreenshots || process.argv.includes('--shipping-screenshots');
 const server = path.join(root, 'server');
 const { Client } = require(server + '/node_modules/pg');
 const database = 'union_pdi_test_b2_browser_' + process.pid;
@@ -113,6 +114,7 @@ async function main() {
     let failMutation;
     let delayMutation;
     let failReplacementRead = false;
+    let delayShippingRead = false;
     app.addHook('onRequest', async (request, reply) => {
       if (failReplacementRead && request.method === 'GET' && request.url === '/api/plan/replacement') {
         return reply.code(500).send({ error: 'INTERNAL_ERROR' });
@@ -126,6 +128,8 @@ async function main() {
         await pause(600);
       }
       if (request.url.includes('search=PDI-00&')) await pause(650);
+      if (delayShippingRead && request.method === 'GET' && request.url === '/api/plan' &&
+          request.headers['x-demo-role'] === 'SHIPPING') await pause(650);
     });
     const apiUrl = await app.listen({ port: 0, host: '127.0.0.1' });
     const ping = await (await fetch(apiUrl + '/ping')).json();
@@ -177,18 +181,24 @@ async function main() {
     const requests = [];
     const requestUrls = new Map();
     const cancelledRequests = [];
+    const cancelledRequestIds = new Set();
+    const planReads = [];
     const mutations = [];
     const exceptions = [];
     page = await connectCdp(pages.find((target) => target.type === 'page').webSocketDebuggerUrl, (msg) => {
       if (msg.method === 'Network.requestWillBeSent') {
-        const { url, method, postData } = msg.params.request;
+        const { url, method, postData, headers } = msg.params.request;
+        const role = Object.entries(headers).find(([name]) => name.toLowerCase() === 'x-demo-role')?.[1];
+        const pathname = new URL(url).pathname;
         requests.push(url);
         requestUrls.set(msg.params.requestId, url);
-        if (method !== 'GET' && new URL(url).pathname.startsWith('/api/')) {
-          mutations.push({ url: new URL(url).pathname, method, postData });
+        if (method === 'GET' && pathname === '/api/plan') planReads.push({ id: msg.params.requestId, role });
+        if (method !== 'GET' && pathname.startsWith('/api/')) {
+          mutations.push({ url: pathname, method, postData, role });
         }
       }
       if (msg.method === 'Network.loadingFailed' && msg.params.canceled) {
+        cancelledRequestIds.add(msg.params.requestId);
         const url = requestUrls.get(msg.params.requestId);
         if (url) cancelledRequests.push(url);
       }
@@ -260,9 +270,11 @@ async function main() {
     }
 
     async function photo(name, batch = 'b2') {
-      if (!(batch === 'b3' ? captureB3Screenshots : captureScreenshots)) return;
+      const enabled = { b2: captureScreenshots, b3: captureB3Screenshots, '6a': captureShippingScreenshots };
+      if (!enabled[batch]) return;
       const png = await cdp('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
-      writeFileSync(path.join(root, 'docs/design', `task-5${batch}-${name}.png`), Buffer.from(png.data, 'base64'));
+      const task = batch === '6a' ? '6a' : `5${batch}`;
+      writeFileSync(path.join(root, 'docs/design', `task-${task}-${name}.png`), Buffer.from(png.data, 'base64'));
     }
 
     async function focusVehicle(id) {
@@ -804,8 +816,8 @@ async function main() {
     console.log('Chrome: empty and blocked rejection, 200 with overflow, 199 resubmission without a replacement, locks in both statuses, and two-context persistence.');
 
     await input('#role-select', 'SHIPPING');
-    await matches('main', 'יתווסף בשלב הבא');
-    assert.equal(await exists('.vehicle-table'), false);
+    await matches('.shipping-screen .plan-status', 'אושרה');
+    assert.equal(await exists('.planner-screen'), false);
     await input('#role-select', 'ADMIN');
     await matches('main', 'יתווסף בשלב הבא');
     assert.equal(await exists(submitPlan), false);
@@ -826,6 +838,215 @@ async function main() {
     })()`), true);
     assert.deepEqual(exceptions, []);
     console.log('Chrome: role switching, isolated cancellation of obsolete requests, RTL/LTR, sticky desktop table and narrow viewport scrolling.');
+
+    const shippingApprove = '#shipping-approve';
+    const shippingReturn = '#shipping-return';
+    const shippingRefresh = '#shipping-refresh';
+    const shippingDialog = '.shipping-return-dialog';
+    const shippingRows = (count) => until(() => evaluate(
+      `document.querySelectorAll('.shipping-vehicles tbody tr').length === ${count}`
+    ), `${count} Shipping rows`);
+    const enabled = (selector) => until(() => evaluate(
+      `document.querySelector(${JSON.stringify(selector)})?.disabled === false`
+    ), `enabled ${selector}`);
+    const selectedIds = async () => (await readPlan()).selected.map((vehicle) => vehicle.vehicle_id).sort();
+
+    async function showShipping(label, count) {
+      await enabled('#role-select');
+      await input('#role-select', 'SHIPPING');
+      await matches('.shipping-screen .plan-status', label);
+      await shippingRows(count);
+      await enabled(shippingRefresh);
+    }
+
+    async function showPlanner(label) {
+      await enabled('#role-select');
+      await input('#role-select', 'PLANNER');
+      await tableRows(300);
+      await matches('.planner-screen .plan-status', label);
+    }
+
+    await setView(1920, 1080);
+    await resetFixtures();
+    await showShipping('טרם נוצרה תכנית', 0);
+    assert.match(await textAt('#role-select option:checked'), /יוסי כהן/);
+    assert.equal(await exists(shippingApprove), false);
+    assert.equal(await exists(shippingReturn), false);
+    assert.deepEqual(await textList('.shipping-item .utilization-value'), ['— / 65', '— / 65', '— / 65', '— / 65']);
+    const beforeRoleSwitch = planReads.length;
+    await showPlanner('טרם נוצרה תכנית');
+    await enabled(recommendation);
+    await click(recommendation);
+    await totals(200, 262, 38);
+    await showShipping('טיוטה', 0);
+    await matches('.shipping-screen', 'התכנית טרם נשלחה');
+    assert.equal(await exists(shippingApprove), false);
+    assert.equal(await exists(shippingReturn), false);
+    assert.ok(planReads.slice(beforeRoleSwitch).some(({ role }) => role === 'SHIPPING'));
+
+    await showPlanner('טיוטה');
+    await enabled(submitPlan);
+    await click(submitPlan);
+    await matches(status, pendingLabel);
+    await showShipping(pendingLabel, 200);
+    await enabled(shippingApprove);
+    assert.deepEqual(await textList('.shipping-item .utilization-value'), ['51 / 65', '52 / 65', '49 / 65', '48 / 65']);
+    assert.equal(await exists('.vehicle-row-action, .replacement-panel, #submit-plan'), false);
+    assert.deepEqual(await evaluate(`[
+      document.documentElement.dir, getComputedStyle(document.querySelector('.shipping-vehicles .identifier')).direction,
+      getComputedStyle(document.querySelector('.shipping-vehicles thead th')).position,
+    ]`), ['rtl', 'ltr', 'sticky']);
+    await photo('pending-approval', '6a');
+    const baselineIds = await selectedIds();
+    assert.equal((await api('/plan/approve', 'POST', undefined, 'PLANNER', 403)).error, 'FORBIDDEN_ROLE');
+    assert.equal((await api('/plan/return', 'POST', { comment: 'בדיקה' }, 'PLANNER', 403)).error, 'FORBIDDEN_ROLE');
+    assert.equal((await api('/plan/generate', 'POST', { confirm: true }, 'SHIPPING', 403)).error, 'FORBIDDEN_ROLE');
+    assert.equal((await api('/settings', 'PUT', { dailyCapacity: 195 }, 'SHIPPING', 403)).error, 'FORBIDDEN_ROLE');
+
+    await showPlanner(pendingLabel);
+    await focusVehicle('PDI-023');
+    await rowDialog();
+    await choose('הוספת חסם');
+    await input(dialog + ' select', 'RECALL');
+    await submitDialog();
+    await totals(200, 261, 39);
+    await showShipping(pendingLabel, 200);
+    await matches('.shipping-vehicles tbody tr.blocked-member', 'RECALL');
+    await matches('.blocker-warnings', 'חסמים פעילים');
+    assert.deepEqual(await selectedIds(), baselineIds);
+    await enabled(shippingApprove);
+
+    failMutation = '/api/plan/approve';
+    await click(shippingApprove);
+    await matches('.shipping-screen [role=alert]', 'לא התקבל אישור');
+    await enabled(shippingApprove);
+    assert.equal((await readPlan()).plan.status, 'PENDING_SHIPPING');
+    const beforeApprove = mutationCount('/plan/approve');
+    delayMutation = '/api/plan/approve';
+    await evaluate(`(() => {
+      const approve = document.querySelector('${shippingApprove}');
+      approve.click();
+      approve.click();
+    })()`);
+    await until(() => evaluate(`document.querySelector('${shippingApprove}').disabled &&
+      document.querySelector('${shippingReturn}').disabled && document.querySelector('#role-select').disabled`),
+      'Shipping duplicate and conflicting action guard');
+    await matches('.shipping-screen .plan-status', 'אושרה');
+    assert.equal(mutationCount('/plan/approve'), beforeApprove + 1);
+    assert.deepEqual(mutations.filter(({ url }) => url === '/api/plan/approve').at(-1), {
+      url: '/api/plan/approve', method: 'POST', postData: undefined, role: 'SHIPPING',
+    });
+    assert.equal(await exists(shippingApprove), false);
+    assert.equal(await exists(shippingReturn), false);
+    assert.deepEqual(await selectedIds(), baselineIds);
+    const approval = await db.AuditEvent.findOne({ where: { event_type: 'STATUS_TRANSITION', actor_role: 'SHIPPING' } });
+    assert.equal(approval.actor_name, 'יוסי כהן');
+    assert.deepEqual(approval.payload, { from: 'PENDING_SHIPPING', to: 'APPROVED' });
+    await photo('approved', '6a');
+    await reloadPage(cdp, evaluate);
+    await showShipping('אושרה', 200);
+    await matches('.shipping-vehicles tbody tr.blocked-member', 'RECALL');
+    await showPlanner('אושרה');
+    await focusVehicle('PDI-023');
+    await removeBlockerInBrowser();
+    await totals(200, 262, 38);
+    await assertMembershipLocked();
+
+    await resetPlan();
+    await reload(300);
+    await enabled(submitPlan);
+    await click(submitPlan);
+    await matches(status, pendingLabel);
+    await showShipping(pendingLabel, 200);
+    await enabled(shippingApprove);
+    const beforeLimitChange = await selectedIds();
+    await api('/settings', 'PUT', { shippingCapacities: { 'נמל חיפה': 45 } }, 'ADMIN');
+    await click(shippingApprove);
+    await matches('.shipping-screen [role=alert]', 'יכולות השילוח העדכניות');
+    await matches('.shipping-item .over-capacity', '52 / 45');
+    assert.equal(await evaluate(`document.querySelector('${shippingApprove}').disabled`), true);
+    assert.equal(await evaluate(`document.querySelector('${shippingReturn}').disabled`), false);
+    assert.equal((await readPlan()).plan.status, 'PENDING_SHIPPING');
+    assert.deepEqual(await selectedIds(), beforeLimitChange);
+    assert.equal((await api('/plan/approve', 'POST', undefined, 'SHIPPING', 409)).error, 'SHIPPING_CAPACITY_EXCEEDED');
+    await photo('shipping-overflow', '6a');
+
+    assert.equal((await api('/plan/return', 'POST', undefined, 'SHIPPING', 400)).error, 'COMMENT_REQUIRED');
+    assert.equal((await api('/plan/return', 'POST', { comment: '   ' }, 'SHIPPING', 400)).error, 'COMMENT_REQUIRED');
+    await evaluate(`document.querySelector('${shippingReturn}').focus()`);
+    await click(shippingReturn);
+    await until(() => exists(shippingDialog + '[open]'), 'Shipping return dialog');
+    assert.equal(await evaluate(`document.activeElement.matches('${shippingDialog} textarea')`), true);
+    await pressEscape();
+    await until(async () => !(await exists(shippingDialog + '[open]')), 'Shipping return Escape');
+    assert.equal(await evaluate(`document.activeElement.matches('${shippingReturn}')`), true);
+    await click(shippingReturn);
+    const beforeReturn = mutationCount('/plan/return');
+    await input(shippingDialog + ' textarea', '   ');
+    await click(shippingDialog + ' button[type=submit]');
+    await matches(shippingDialog + ' [role=alert]', 'יש להזין הערה');
+    assert.equal(mutationCount('/plan/return'), beforeReturn);
+    const shippingNote = 'נא לבדוק את עומס השילוח בנמל חיפה';
+    await input(shippingDialog + ' textarea', `  ${shippingNote}  `);
+    await photo('return-dialog', '6a');
+    delayMutation = '/api/plan/return';
+    await evaluate(`(() => {
+      const confirm = document.querySelector('${shippingDialog} button[type=submit]');
+      confirm.click();
+      confirm.click();
+    })()`);
+    await matches('.shipping-screen .plan-status', 'הוחזרה לתיקון');
+    await matches('.shipping-screen .returned-note', shippingNote);
+    assert.equal(mutationCount('/plan/return'), beforeReturn + 1);
+    const returnRequest = mutations.filter(({ url }) => url === '/api/plan/return').at(-1);
+    assert.equal(returnRequest.role, 'SHIPPING');
+    assert.deepEqual(JSON.parse(returnRequest.postData), { comment: shippingNote });
+    assert.equal(await exists(shippingApprove), false);
+    assert.equal(await exists(shippingReturn), false);
+    await showPlanner('הוחזרה לתיקון');
+    await matches('.returned-note', shippingNote);
+    await excludeInBrowser('PDI-195', 'OPERATIONAL_DELAY');
+    await totals(199, 261, 39);
+    await click(submitPlan);
+    await matches(status, pendingLabel);
+    await showShipping(pendingLabel, 199);
+    await matches('.shipping-item .over-capacity', '52 / 45');
+
+    await api('/settings', 'PUT', { shippingCapacities: { 'נמל חיפה': 65 } }, 'ADMIN');
+    await click(shippingRefresh);
+    await enabled(shippingApprove);
+    await api('/plan/return', 'POST', { comment: 'הוחזרה כבר בחלון אחר' }, 'SHIPPING');
+    await click(shippingApprove);
+    await matches('.shipping-screen [role=alert]', 'מצב התכנית השתנה');
+    await matches('.shipping-screen .plan-status', 'הוחזרה לתיקון');
+    assert.equal(await exists(shippingApprove), false);
+    await showPlanner('הוחזרה לתיקון');
+    await matches('.returned-note', 'הוחזרה כבר בחלון אחר');
+    await enabled(submitPlan);
+    await click(submitPlan);
+    await matches(status, pendingLabel);
+
+    delayShippingRead = true;
+    const slowOffset = planReads.length;
+    await input('#role-select', 'SHIPPING');
+    await until(() => planReads.slice(slowOffset).some(({ id, role }) =>
+      role === 'SHIPPING' && !cancelledRequestIds.has(id)), 'in-flight Shipping plan read');
+    const inFlight = planReads.slice(slowOffset).filter(({ id, role }) =>
+      role === 'SHIPPING' && !cancelledRequestIds.has(id));
+    await showPlanner(pendingLabel);
+    await until(() => inFlight.some(({ id }) => cancelledRequestIds.has(id)), 'role switch aborted Shipping read');
+    delayShippingRead = false;
+    await pause(700);
+    assert.equal(await exists('.shipping-screen'), false);
+    await showShipping(pendingLabel, 199);
+    await setView(390, 844);
+    assert.equal(await evaluate(`(() => {
+      const { clientWidth, scrollWidth } = document.documentElement;
+      window.scrollTo(0, 640);
+      return scrollWidth === clientWidth && window.scrollY > 0;
+    })()`), true);
+    assert.deepEqual(exceptions, []);
+    console.log('Chrome Shipping: no-plan/DRAFT, 200-row review, blocker warning and approval, reload, live 52/45 overflow, return dialog, resubmission, stale status, role cancellation and responsive layout.');
 
   } finally {
     page?.close();

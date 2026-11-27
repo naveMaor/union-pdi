@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { PLAN_DATE, ROLES, ROLE_LABELS, ROLE_NAMES } from './constants';
 import { formatDate } from './vehicleView';
 import { PlannerScreen } from './screens/PlannerScreen';
+import { ShippingScreen } from './screens/ShippingScreen';
 import { ComingSoonScreen } from './screens/ComingSoonScreen';
 import './App.css';
 
@@ -10,7 +11,7 @@ function App() {
   const [isMutating, setIsMutating] = useState(false);
 
   return (
-    <div className={role === 'PLANNER' ? 'app app-planner' : 'app'}>
+    <div className={`app app-${role.toLowerCase()}`}>
       <header className="app-header">
         <h1>{role === 'PLANNER' ? 'תכנון יומי' : ROLE_LABELS[role]}</h1>
         <p className="plan-date">
@@ -35,6 +36,8 @@ function App() {
       <main>
         {role === 'PLANNER' ? (
           <PlannerScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />
+        ) : role === 'SHIPPING' ? (
+          <ShippingScreen role={role} isMutating={isMutating} setIsMutating={setIsMutating} />
         ) : <ComingSoonScreen role={role} />}
       </main>
     </div>

@@ -50,6 +50,8 @@ export const api = {
   generatePlan: (role, { confirm = false } = {}) =>
     request('/plan/generate', { method: 'POST', role, body: confirm ? { confirm: true } : undefined }),
   submitForShipping: (role) => request('/plan/submit', { method: 'POST', role }),
+  approveForShipping: (role) => request('/plan/approve', { method: 'POST', role }),
+  returnToPlanner: (role, comment) => request('/plan/return', { method: 'POST', role, body: { comment } }),
   excludeVehicle: (role, vehicleId, body) =>
     request(`/plan/vehicles/${encodeURIComponent(vehicleId)}/exclude`, { method: 'POST', role, body }),
   cancelExclusion: (role, vehicleId) =>

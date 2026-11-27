@@ -1,4 +1,7 @@
-import { BRANDS, PLAN_STATUS_LABELS, SOURCE_LOCATIONS } from '../constants';
+import { BRANDS, PLAN_STATUS_LABELS } from '../constants';
+import { shippingCapacityRows } from '../shippingCapacity';
+import { PlanBlockerWarnings } from './PlanBlockerWarnings';
+import { ShippingCapacityPanel } from './ShippingCapacityPanel';
 import { StatTiles } from './StatTiles';
 import { Loading, ErrorMessage } from './StatusMessage';
 
@@ -39,7 +42,7 @@ export function PlanSummaryPanel({ planState, settingsState, allVehiclesState, c
       brand, { selected: 0, target: quota.quota_target, type: quota.quota_type, overage: 0 },
     ]),
   ) : brandQuotaUtilization;
-  const shippingCapacities = settings?.shippingCapacities;
+  const shippingRows = shippingCapacityRows(planState.data ? sourceLocationCounts : null, settings?.shippingCapacities);
 
   return (
     <section className="plan-summary" aria-label="סיכום תכנון יומי">
@@ -79,48 +82,13 @@ export function PlanSummaryPanel({ planState, settingsState, allVehiclesState, c
           ) : <p className="status status-empty">נתוני מכסות זמינים לאחר טעינת התכנית וההגדרות.</p>}
         </section>
 
-        <section className="panel limit-panel" aria-labelledby="shipping-heading">
-          <h2 id="shipping-heading">יכולת שילוח לפי מקור</h2>
-          {settingsState.loading && <Loading label="טוען יכולות שילוח…" />}
-          {settingsState.error && (
-            <ErrorMessage error={settingsState.error} label="שגיאה בטעינת הגדרות התכנון" />
-          )}
-          {shippingCapacities && (
-            <ul className="limit-list">
-              {SOURCE_LOCATIONS.map((location) => {
-                const limit = shippingCapacities[location];
-                const selected = planState.data ? sourceLocationCounts[location] ?? 0 : null;
-                const over = selected !== null && selected > limit;
-                return (
-                  <li key={location} className="shipping-item">
-                    <span>{location}</span>
-                    <bdi dir="ltr" className={over ? 'utilization-value over-capacity' : 'utilization-value'}>
-                      {selected ?? '—'} / {limit}
-                    </bdi>
-                    {over && <span className="over-capacity">חריגה מיכולת שילוח</span>}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+        <ShippingCapacityPanel settingsState={settingsState} rows={shippingRows} />
       </div>
 
       {plan?.status === 'RETURNED' && plan.returned_note && (
         <p className="returned-note"><strong>הערת החזרה</strong> <bdi>{plan.returned_note}</bdi></p>
       )}
-      {blockerWarnings.length > 0 && (
-        <details className="blocker-warnings">
-          <summary>חסמים פעילים בתכנית ({blockerWarnings.length})</summary>
-          <ul>
-            {blockerWarnings.map((warning) => (
-              <li key={warning.vehicle_id}>
-                <bdi dir="ltr">{warning.vehicle_id} · {warning.active_blocker}</bdi>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      <PlanBlockerWarnings warnings={blockerWarnings} />
     </section>
   );
 }
