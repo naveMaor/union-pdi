@@ -872,7 +872,66 @@ Status: IN PROGRESS
   section
 
 #### Step 7.5 — Deployment architecture and hosting selection
-- [ ] Choose a hosting approach for the app and PostgreSQL
+- [x] Choose a hosting approach for the app and PostgreSQL: Render, free
+  tier only (web service, static site, PostgreSQL), private GitHub repo
+  connected via Render's GitHub App. The human accepted the free Postgres
+  instance's limited lifetime (historically ~30-90 days before expiry) as
+  a known risk, with recreation/upgrade as the contingency if it expires
+  before the recruitment process concludes.
+
+**Render configuration (approved, not yet provisioned):**
+
+Root Directory is left **blank** on both Render services (repo root is
+checked out in full), so `server/src/scripts/seed.js`'s CSV path
+(`../../../docs/assignment/pdi_seed_300_vehicles.csv` relative to
+`server/src/scripts`) and the single root `.env`/`.env.example` stay
+reachable exactly as they are locally — no code changes needed for this.
+
+| | Backend (`union-pdi-api`, Web Service) | Frontend (`union-pdi-web`, Static Site) |
+|---|---|---|
+| Root Directory | (blank) | (blank) |
+| Build Command | `npm ci --include=dev --prefix server` | `npm ci --include=dev --prefix client && npm run build --prefix client` |
+| Start / Publish | `npm run db:migrate --prefix server && npm run db:seed --prefix server && npm start --prefix server` | Publish Directory: `client/dist` |
+| Env vars | `POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`DB_HOST`/`DB_PORT` (from Render's internal Postgres connection fields), `HOST=0.0.0.0`, `CORS_ORIGIN=<static site URL>`, `NODE_ENV=production`, `NODE_VERSION=24`. `PORT` left unset (Render injects its own; already read via `process.env.PORT`). | `VITE_API_BASE_URL=<backend URL>/api` (build-time only), `NODE_VERSION=24` |
+
+`sequelize-cli` stays in `devDependencies` (no reclassification); `npm ci
+--include=dev` installs it regardless of `NODE_ENV`, verified directly
+(`NODE_ENV=production npm ci --include=dev --prefix server` and `npm run
+db:migrate --prefix server` both run correctly from the repo root).
+`NODE_VERSION=24` is set directly as a Render env var rather than adding
+per-directory `.node-version` files (the existing root `.nvmrc` isn't
+read with a blank Root Directory setup, but `NODE_VERSION` always is).
+
+No internal-database SSL configuration needed (same private network).
+Two-step deploy order: create the backend first to learn its URL for the
+static site's `VITE_API_BASE_URL`, then create the static site, then set
+the backend's `CORS_ORIGIN` to the static site's exact URL and redeploy
+the backend once.
+
+**Verified in a disposable database, `NODE_ENV=production`, before
+approving this plan:** migrations are idempotent (rerunning `db:migrate`
+against an already-migrated DB: "No migrations were executed, database
+schema was already up to date"). A full production-mode cycle — migrate,
+seed, generate a 199-vehicle recommendation, add a blocker, manually
+exclude a vehicle, change a setting as Admin — followed by a second
+migrate+seed pass against the *same populated database* (simulating a
+Render redeploy/restart, where there is no one-off job support) left all
+eight development-table fingerprints identical (vehicles 300, settings 1,
+brand_quotas 5, shipping_capacities 4, plans 1, plan_vehicles 199,
+manual_exclusions 1, audit_events 5) and preserved the Admin's changed
+`daily_capacity` setting exactly. Confirms `findOrCreate`/
+`ignoreDuplicates` in `seed.js` make repeated migrate+seed on every
+restart safe for all existing plans, settings, membership, exclusions,
+blockers and audit records.
+
+Pre-push review (secrets, git history, `.gitignore`, untracked assets):
+no secrets found in any tracked file or the full git history; `.env` is
+gitignored, only placeholder `.env.example` files are tracked; the
+human-discovered CORS defect is correctly attributed in `docs/AI_LOG.md`.
+Four confirmed-unused untracked scaffold assets (`client/public/icons.svg`,
+`client/src/assets/{hero.png,react.svg,vite.svg}` — none referenced
+anywhere in source, confirmed by grep and by a clean build/lint after
+deleting them) were removed.
 
 #### Step 7.6 — Deployment
 - [ ] Deploy to the chosen public host
