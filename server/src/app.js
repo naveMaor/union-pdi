@@ -11,7 +11,8 @@ function buildApp() {
   });
 
   app.register(cors, {
-    origin: 'http://localhost:5173'
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
   });
 
   app.get('/ping', async () => {
