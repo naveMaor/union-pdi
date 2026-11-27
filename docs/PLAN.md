@@ -724,9 +724,9 @@ tests because cleanup checks for remaining test databases. See the
 [local database setup](../README.md#database-postgresql-via-docker-compose).
 
 From the repository root, run `node client/scripts/verify-batch-b2.cjs`.
-The retained verifier runs both Batch B2 and Batch B3. Add
+The retained verifier includes the Batch B2 and Batch B3 cases. Add
 `--b3-screenshots` to update the four Batch B3 captures, or
-`--screenshots` to update the Batch B2 and Batch B3 captures under
+`--screenshots` to update all retained captures under
 `docs/design/`.
 
 #### Step 5.8 — Submission and lifecycle
@@ -768,7 +768,7 @@ Browser evidence [Submission with overflow](design/task-5b3-submission.png) ·
 [RETURNED](design/task-5b3-returned.png)
 
 ### Task 6 — Shipping and Admin Frontends
-Status: IN PROGRESS — Steps 6.1–6.4 complete and accepted, including both backend validation fixes and all four Shipping captures. Steps 6.5–6.8 remain pending.
+Status: COMPLETE — Steps 6.1–6.8 accepted, including both batches, validation fixes and browser evidence.
 
 #### Step 6.1 — Shipping/Admin API contract verification
 - [x] Verify `GET /api/plan`, `GET /api/settings`, the Admin-only `PUT /api/settings`, and the Shipping-only approval and return transitions against isolated PostgreSQL. Approval uses a bodyless `POST /api/plan/approve`. Return uses `POST /api/plan/return` with a nonblank string `comment`. Both writes return `{ plan }`.
@@ -785,7 +785,7 @@ Status: IN PROGRESS — Steps 6.1–6.4 complete and accepted, including both ba
 
 | Case | Browser verification | Direct API or persistence verification |
 | --- | --- | --- |
-| SPEC §14 baseline and locking | Planner generates and submits 200 vehicles. Shipping approves the read-only plan. Planner membership controls stay locked. | APPROVED persists on reload. Role guards reject out-of-role writes. |
+| SPEC §14 baseline and locking | Planner generates and submits 200 vehicles. Shipping approves the read-only plan and shows APPROVED after reload. Planner membership controls stay locked. | Direct API calls verify that role guards reject out-of-role writes. |
 | SPEC §14 scenario 9 | Haifa 52/45 blocks approval after refresh. The return dialog rejects whitespace, supports Escape and submits a valid note. Planner sees the note, excludes a vehicle and resubmits 199. | Stale approval and direct approval return `SHIPPING_CAPACITY_EXCEEDED`. Omitted and whitespace notes return `COMMENT_REQUIRED`. Admin settings changes preserve membership. |
 | SPEC §§8.1 and 9 | A blocker added after submission appears in the summary and vehicle row. Shipping can still approve. | The blocker write preserves status and membership. The approval audit identifies the Shipping demo user. |
 | Lifecycle and interaction | No-plan, DRAFT, RETURNED and APPROVED states. Duplicate and conflicting actions, network failure feedback, stale status refresh and role-switch request cancellation. Keyboard dialog, RTL/LTR, sticky desktop table and narrow viewport scrolling. | A competing return makes stale approval fail. The client refreshes to the persisted status. |
@@ -803,16 +803,46 @@ Shipping browser evidence
 - [Approved](design/task-6a-approved.png)
 
 #### Step 6.5 — Admin settings screen
-- [ ] Implement the Admin settings screen.
+- [x] Activate the ADMIN demo role for רונית שמש. Load daily capacity, five brand targets and types, four shipping limits and both envelope thresholds from the server. Group the Hebrew form by how each setting takes effect.
 
 #### Step 6.6 — Settings validation and persistence
-- [ ] Verify Admin settings validation and persistence.
+- [x] Save only changed settings. Each changed brand sends the target and type required by the API. Keep invalid drafts editable, announce errors, and protect against duplicate saves. An explicit reload discards edits after confirmation and reads the persisted settings again.
+- [x] Reject malformed `brandQuotas` maps and values outside the PostgreSQL `INTEGER` range with HTTP 400 `INVALID_SETTING_VALUE`. Preserve the minimum of 1 for daily capacity and 0 for quotas, shipping limits and envelope thresholds. The `INTEGER` storage maximum is 2,147,483,647. Yellow and red thresholds can still be set in either order. The form sends a complete object for each changed brand and rejects unrepresentable values before writing.
 
 #### Step 6.7 — Snapshot versus live settings behavior
-- [ ] Verify how plan snapshots and live settings are displayed across roles.
+- [x] Preserve existing plan membership and the capacity and quota snapshots. Generate or regenerate from current capacity and brand settings. Use current shipping limits for approval and current envelope thresholds for display.
 
 #### Step 6.8 — Cross-role integration and Task 6 acceptance
-- [ ] Complete cross-role integration and human acceptance of Task 6.
+- [x] Extend the retained Chrome verifier to exercise all three interfaces against a CSV-seeded disposable PostgreSQL database.
+- [x] Human accepted the Settings validation follow-up and all of Task 6, and approved the three Batch 6B local commits.
+
+| SPEC §14 and supplemental checks | Browser acceptance | Direct API, database or backend tests |
+| --- | --- | --- |
+| 1. Seed | Planner lists all 300 vehicles. | Backend verifies PostgreSQL import and idempotent reseeding. |
+| 2. Eligibility | Planner shows 262 eligible and 38 ineligible, with 29 blocker and 9 customs reasons. | |
+| 3. Baseline recommendation | Planner generates 200. Brand counts and flexible quota overages match the specification. | |
+| 4. Source distribution | Shipping shows 51 Ashdod, 52 Haifa, 49 bonded Ashdod and 48 bonded Haifa. | |
+| 5. Capacity 195 | Admin saves 195. Planner keeps the existing 200 / 200 until confirmed regeneration, then shows 195 / 195. The retained Planner case also checks the displayed brand counts. | Direct plan read after the cross-role regeneration verifies Toyota 55, Lexus 36, GAC 20, Geely 42 and Zeekr 42. |
+| 6. Flexible replacement | In Planner, excluding PDI-195 offers PDI-200 and confirmation restores 200 members. | |
+| 7. Hard replacement | In Planner, excluding PDI-281 offers PDI-107 and confirmation restores 200 members. | |
+| 8. Regeneration | Planner retains the exclusion on regeneration. Cancellation and a subsequent explicit rerun restore the vehicle. | |
+| 9. Shipping overflow | Admin saves Haifa 45, Planner submits, and Shipping blocks approval at 52 / 45. Shipping returns the plan with a note. Admin restores the limit, then Planner resubmits and Shipping approves. | Direct approval over capacity and a return without a note are rejected. |
+| 10. Plan locking | Planner membership actions stay unavailable in PENDING_SHIPPING and APPROVED. | A direct exclusion request receives `409 PLAN_LOCKED`. |
+| 11. Selected blocker | Planner warns and blocks submission. Shipping warns for a blocker added after submission and can approve within live capacities. | |
+| 12. Two contexts | Separate Chrome contexts and reloads agree on persisted settings. Retained Planner checks compare plan status and exclusion details across contexts. | Database checks verify persisted membership, the Admin audit actor and patch scope. |
+| Settings validation follow-up | Admin prevents requests for invalid fields. Injected HTTP 400 and 500 responses exercise error feedback and preserving the draft for retry. | Backend route tests verify the actual HTTP 400 contract for malformed quota maps and out-of-range integers in every settings column. Mixed updates are atomic. Valid boundaries and partial updates persist. Rejections leave settings, plan snapshots, membership and audit records unchanged. |
+
+The verifier also covers Geely target and type changes before and after regeneration, envelope colors without membership changes, local validation, failed writes, discard and reload, duplicate saves, role switches, cancelled reads, keyboard focus and a narrow viewport.
+
+After the settings validation fixes, all 99 backend tests, the independent 15-test focused route run, frontend build and lint, and the complete headless Chrome run passed. The API probe, backend tests and Chrome verifier used disposable PostgreSQL databases. All eight development-table fingerprints and the tracked seed CSV matched before and after verification. Browser verification used Chrome only. The three approved Admin captures were preserved byte for byte.
+
+Use the existing Task 5 Chrome and PostgreSQL setup. From the repository root, run `node client/scripts/verify-batch-b2.cjs`. Add `--admin-screenshots` to refresh only the three Admin captures. `--screenshots` refreshes all retained captures. Run `npm test` in `server/` and `npm run lint` and `npm run build` in `client/`.
+
+Admin browser evidence
+
+- [Default settings](design/task-6b-admin-default-settings.png)
+- [Validation](design/task-6b-admin-validation.png)
+- [Saved changes](design/task-6b-admin-saved-changes.png)
 
 ### Task 7 — QA and Deployment
 Status: NOT STARTED
