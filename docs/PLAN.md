@@ -468,9 +468,10 @@ Acceptance:
 Invalid actions are rejected server-side.
 
 ### Task 5 — Planner Frontend
-Status: IN PROGRESS
+Status: COMPLETE
 
-Steps 5.1–5.7 are complete and accepted. Steps 5.8–5.9 remain pending.
+Steps 5.1–5.9 are complete and accepted. The human approved the Planner
+acceptance results and all four Batch B3 browser captures.
 
 Stack: React + Vite, plain JavaScript (no TypeScript), plain CSS (no
 component library), native `fetch` via a centralized API client. Hebrew RTL
@@ -723,16 +724,48 @@ tests because cleanup checks for remaining test databases. See the
 [local database setup](../README.md#database-postgresql-via-docker-compose).
 
 From the repository root, run `node client/scripts/verify-batch-b2.cjs`.
-Add `--screenshots` to replace the five Batch B2 captures under
+The retained verifier runs both Batch B2 and Batch B3. Add
+`--b3-screenshots` to update the four Batch B3 captures, or
+`--screenshots` to update the Batch B2 and Batch B3 captures under
 `docs/design/`.
 
 #### Step 5.8 — Submission and lifecycle
-- [ ] Submit-for-shipping action and resulting status/locking reflected in
-  the UI (no further edits once PENDING_SHIPPING/APPROVED)
+- [x] Submit eligible, nonempty DRAFT and RETURNED plans. Reflect
+  PENDING_SHIPPING and APPROVED locks on membership operations, and
+  retain vehicle blocker controls and warnings.
 
 #### Step 5.9 — Integration, UX and acceptance tests
-- [ ] End-to-end frontend coverage against the real backend; SPEC §14
-  scenarios exercised through the UI
+- [x] Run the retained Chrome verifier against the actual API and a
+  CSV-seeded disposable PostgreSQL database.
+
+Planner acceptance against SPEC §14
+
+| Scenario | Verified through the Planner in Chrome | Other verification or Task 6 coverage |
+| --- | --- | --- |
+| 1. Seed | The UI lists 300 vehicles. | The backend suite covers idempotent seeding. |
+| 2. Eligibility | 262 eligible and 38 ineligible, with 29 blocker and 9 customs reasons. | |
+| 3–4. Baseline | First generation produces a 200-vehicle DRAFT with the exact brand and source totals. | |
+| 5. Capacity 195 | Generation selects 195 with the exact specified brand totals. | ADMIN API sets capacity. The settings UI belongs to Task 6. |
+| 6–7. Replacements | PDI-195 → PDI-200 and PDI-281 → PDI-107 independently move 200 → 199 → 200. | |
+| 8. Regeneration | A rerun preserves an exclusion. Cancellation alone does not add the vehicle, and a subsequent rerun restores it. | |
+| 9. Shipping overflow | Haifa 52/45 is shown as a warning. Submission succeeds and the Planner displays the return note. | ADMIN API sets the limit. SHIPPING API rejects approval and blank returns, and accepts a nonblank return. Their UIs belong to Task 6. |
+| 10. Locking | PENDING_SHIPPING and APPROVED hide submission, regeneration, exclusion, cancellation and replacement confirmation. | Direct Planner API requests return `409 PLAN_LOCKED`. SHIPPING API prepares APPROVED. |
+| 11. Selected blocker | The row is flagged, membership stays unchanged and submission is disabled. Removing the blocker restores eligibility. A stale submission is rejected and refreshes the UI. | Direct API returns `409 INELIGIBLE_VEHICLES_IN_PLAN`. |
+| 12. Two browser contexts | After reload both contexts show matching plan status, capacity, exclusion details and shipping settings. A stale resubmission refreshes the second context to PENDING_SHIPPING. | Shipping and Admin mutations use their APIs. Their UIs belong to Task 6. |
+
+The Chrome run also verified empty-plan rejection, submission with 200
+and 199 vehicles, returned-plan editing, resubmission with a replacement
+still available, duplicate and conflicting writes, mutation failures,
+rapid filters and network cancellation, role switching, keyboard dialogs,
+RTL/LTR, a sticky desktop table and narrow viewport scrolling. Browser
+coverage used headless Chrome. All 94 backend tests and frontend build and
+lint passed. The HTTP probe and the Chrome verifier both matched the
+fingerprints of all eight development tables before and after.
+
+Browser evidence [Submission with overflow](design/task-5b3-submission.png) ·
+[PENDING_SHIPPING](design/task-5b3-pending-shipping.png) ·
+[Blocked submission](design/task-5b3-blocked-submission.png) ·
+[RETURNED](design/task-5b3-returned.png)
 
 ### Task 6 — Shipping and Admin Frontends
 Status: NOT STARTED

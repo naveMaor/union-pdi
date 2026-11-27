@@ -241,3 +241,23 @@ Codex started from accepted checkpoint `56e7272`. Before editing the client, it 
 The human accepted Steps 5.6–5.7, the verification results and all five
 browser captures, and approved separate Planner and documentation commits.
 Steps 5.8–5.9 remain pending.
+
+## Batch B3 Planner submission and acceptance
+
+Codex started from accepted checkpoint `102e7cc`. The live submission probe
+used a disposable CSV-seeded database and verified that a bodyless Planner
+POST returns `{ plan }` with PENDING_SHIPPING. It exercised missing-plan and
+role guards, empty and ineligible plans, and Haifa 52/45 submission. The
+local database container had stopped with Docker Desktop. Starting the
+existing service brought the same healthy container back for verification.
+
+- The Planner uses its complete selected-vehicle summary to disable submission for empty and ineligible plans, even when the vehicle table is filtered. The existing mutation guard handles the bodyless POST and refreshes the plan and vehicle reads on success or rejection. The server remains authoritative for stale state. Shipping capacity warnings and replacement suggestions remain visible independently of submission eligibility.
+- Extended the existing Chrome DevTools verifier, keeping the Batch B2 cases. Browser interactions generated the baseline and 195-vehicle recommendations, exercised both replacement pairs, regenerated after an exclusion and cancellation, and submitted 200 vehicles with Haifa at 52/45. After an API-prepared return with a note, the Planner excluded a vehicle and resubmitted 199 without accepting the replacement.
+- Test-only failure and delay fixtures exercised Hebrew feedback and duplicate-write protection. Two independent Chrome contexts with separate browser storage compared the persisted plan, exclusion reason and note, and shipping settings. The second context's stale submission received a lock response and refreshed before reload. The Admin and Shipping APIs supplied cross-role states and verified overflow approval rejection and required return notes. Their frontend coverage remains in Task 6.
+- Reviewed the hook lint directives using oxlint's unused-directive check and an unsuppressed temporary copy. The copy reported two dynamic-dependency diagnostics and one effect-state diagnostic. Chrome observed the old search being cancelled through DevTools and confirmed that it did not replace the newer result. The hook was retained.
+- All 94 backend tests, frontend build and lint, and the complete retained headless Chrome verifier passed. The API probe and browser verifier used separate disposable databases and found identical fingerprints across all eight development tables before and after. Named vehicle fixtures were restored before reuse. Four 1920 × 1080 B3 captures were saved. No backend defect was reproduced in the exercised paths.
+
+The human accepted Steps 5.8–5.9 and the complete Task 5 Planner frontend,
+including the verification results and four Batch B3 captures. The human
+approved separate local commits for the implementation and acceptance
+evidence. Shipping and Admin frontend acceptance remains in Task 6.
