@@ -910,6 +910,40 @@ async function main() {
       document.documentElement.dir, getComputedStyle(document.querySelector('.shipping-vehicles .identifier')).direction,
       getComputedStyle(document.querySelector('.shipping-vehicles thead th')).position,
     ]`), ['rtl', 'ltr', 'sticky']);
+
+    // Human-requested Shipping search/sort (client-side, scoped to plan members only).
+    const pendingSelected = (await readPlan()).selected;
+    const byVehicleId = (a, b) => a.vehicle_id.localeCompare(b.vehicle_id);
+    const idsByVehicleId = [...pendingSelected].sort(byVehicleId).map((v) => v.vehicle_id);
+    const idsByEnvelopeDate = [...pendingSelected]
+      .sort((a, b) => a.envelope_date.localeCompare(b.envelope_date) || byVehicleId(a, b))
+      .map((v) => v.vehicle_id);
+    const searchTargetId = pendingSelected[10].vehicle_id;
+
+    await input('.shipping-vehicles input[type=search]', searchTargetId);
+    await shippingRows(1);
+    assert.equal(await textAt('.shipping-vehicles tbody th'), searchTargetId);
+    assert.deepEqual(await textList('.shipping-item .utilization-value'), ['51 / 65', '52 / 65', '49 / 65', '48 / 65']);
+    await input('.shipping-vehicles input[type=search]', pendingSelected[10].demo_vin);
+    await shippingRows(1);
+    assert.equal(await textAt('.shipping-vehicles tbody th'), searchTargetId);
+    await input('.shipping-vehicles input[type=search]', 'NOT-A-REAL-ID');
+    await until(() => evaluate("document.querySelector('.shipping-vehicles .status-empty') !== null"), 'Shipping no-results state');
+    await input('.shipping-vehicles input[type=search]', '');
+    await shippingRows(200);
+
+    // Checkbox starts checked (matching Planner's default); unchecking switches to vehicle_id order.
+    assert.deepEqual(await textList('.shipping-vehicles tbody th'), idsByEnvelopeDate);
+    await evaluate(`document.querySelector('.shipping-vehicles input[type=checkbox]').click()`);
+    await until(() => evaluate(
+      `document.querySelector('.shipping-vehicles tbody th').textContent.trim() === ${JSON.stringify(idsByVehicleId[0])}`
+    ), 'Shipping unsorted order');
+    assert.deepEqual(await textList('.shipping-vehicles tbody th'), idsByVehicleId);
+    await evaluate(`document.querySelector('.shipping-vehicles input[type=checkbox]').click()`);
+    await until(() => evaluate(
+      `document.querySelector('.shipping-vehicles tbody th').textContent.trim() === ${JSON.stringify(idsByEnvelopeDate[0])}`
+    ), 'Shipping re-sorted by envelope date');
+
     await photo('pending-approval', '6a');
     const baselineIds = await selectedIds();
     assert.equal((await api('/plan/approve', 'POST', undefined, 'PLANNER', 403)).error, 'FORBIDDEN_ROLE');

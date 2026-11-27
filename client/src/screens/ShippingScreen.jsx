@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { PLAN_STATUS_LABELS } from '../constants';
 import { usePlanSummary, useSettings } from '../hooks/useApi';
@@ -17,36 +17,60 @@ const SHIPPING_ERRORS = {
   FORBIDDEN_ROLE: 'התפקיד הנוכחי אינו מורשה לבצע את הפעולה.',
 };
 
-function ShippingVehicles({ vehicles }) {
+function ShippingVehicles({ vehicles, search, onSearchChange, sortByEnvelopeDate, onSortChange }) {
   return (
     <section className="panel vehicle-panel shipping-vehicles" aria-labelledby="shipping-vehicles-heading">
       <h2 id="shipping-vehicles-heading">רכבים בתכנית השילוח</h2>
+      <div className="filter-row">
+        <label className="vehicle-search">
+          חיפוש (מזהה רכב או שלדה)
+          <input
+            type="search"
+            dir="ltr"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="PDI-001 / DEMO-000001"
+          />
+        </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={sortByEnvelopeDate}
+            onChange={(e) => onSortChange(e.target.checked)}
+          />
+          מיין לפי תאריך מעטפה
+        </label>
+      </div>
       <div className="vehicle-scroll" role="region" aria-labelledby="shipping-vehicles-heading" tabIndex={0}>
-        <table className="vehicle-table">
-          <thead>
-            <tr>
-              <th scope="col">מזהה רכב</th>
-              <th scope="col">שלדה</th>
-              <th scope="col">מותג ודגם</th>
-              <th scope="col">מקור</th>
-              <th scope="col">חסם פעיל</th>
-            </tr>
-          </thead>
-          <tbody>
-            {vehicles.map((vehicle) => {
-              const hasBlocker = vehicle.active_blocker !== 'NONE';
-              return (
-                <tr key={vehicle.vehicle_id} className={hasBlocker ? 'blocked-member' : undefined}>
-                  <th scope="row"><bdi dir="ltr" className="identifier">{vehicle.vehicle_id}</bdi></th>
-                  <td><bdi dir="ltr" className="identifier">{vehicle.demo_vin}</bdi></td>
-                  <td><bdi dir="ltr">{vehicle.brand} {vehicle.model}</bdi></td>
-                  <td>{vehicle.source_location}</td>
-                  <td>{hasBlocker ? <bdi dir="ltr" className="chip chip-danger">{vehicle.active_blocker}</bdi> : '—'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        {vehicles.length === 0 ? (
+          <p className="status status-empty">לא נמצאו רכבים התואמים את החיפוש.</p>
+        ) : (
+          <table className="vehicle-table">
+            <thead>
+              <tr>
+                <th scope="col">מזהה רכב</th>
+                <th scope="col">שלדה</th>
+                <th scope="col">מותג ודגם</th>
+                <th scope="col">מקור</th>
+                <th scope="col">חסם פעיל</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vehicles.map((vehicle) => {
+                const hasBlocker = vehicle.active_blocker !== 'NONE';
+                return (
+                  <tr key={vehicle.vehicle_id} className={hasBlocker ? 'blocked-member' : undefined}>
+                    <th scope="row"><bdi dir="ltr" className="identifier">{vehicle.vehicle_id}</bdi></th>
+                    <td><bdi dir="ltr" className="identifier">{vehicle.demo_vin}</bdi></td>
+                    <td><bdi dir="ltr">{vehicle.brand} {vehicle.model}</bdi></td>
+                    <td>{vehicle.source_location}</td>
+                    <td>{hasBlocker ? <bdi dir="ltr" className="chip chip-danger">{vehicle.active_blocker}</bdi> : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </section>
   );
@@ -60,10 +84,26 @@ export function ShippingScreen({ role, isMutating, setIsMutating }) {
   const commentField = useRef(null);
   const [comment, setComment] = useState('');
   const [commentError, setCommentError] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sortByEnvelopeDate, setSortByEnvelopeDate] = useState(true);
   const summary = planState.data;
   const plan = summary?.plan;
   const pendingReview = plan?.status === 'PENDING_SHIPPING';
   const submitted = pendingReview || plan?.status === 'APPROVED';
+  // Search/sort only reorders and narrows which already-loaded plan members are
+  // shown in this panel — global totals, capacity, quota and approval checks
+  // below all keep reading the unfiltered summary, same as Planner's own tabs.
+  const displayedVehicles = useMemo(() => {
+    if (!submitted) return [];
+    const term = search.trim().toLowerCase();
+    const filtered = term
+      ? summary.selected.filter((vehicle) =>
+        vehicle.vehicle_id.toLowerCase().includes(term) || vehicle.demo_vin.toLowerCase().includes(term))
+      : summary.selected;
+    return [...filtered].sort((a, b) => sortByEnvelopeDate
+      ? a.envelope_date.localeCompare(b.envelope_date) || a.vehicle_id.localeCompare(b.vehicle_id)
+      : a.vehicle_id.localeCompare(b.vehicle_id));
+  }, [submitted, summary, search, sortByEnvelopeDate]);
   const rows = shippingCapacityRows(submitted ? summary.sourceLocationCounts : null, settingsState.data?.shippingCapacities);
   const missingLimits = rows.some(({ limit }) => !Number.isInteger(limit));
   const overflow = rows.some((row) => row.overflow);
@@ -143,7 +183,8 @@ export function ShippingScreen({ role, isMutating, setIsMutating }) {
       {submitted && (
         <>
           <PlanBlockerWarnings warnings={summary.blockerWarnings} />
-          <ShippingVehicles vehicles={summary.selected} />
+          <ShippingVehicles vehicles={displayedVehicles} search={search} onSearchChange={setSearch}
+            sortByEnvelopeDate={sortByEnvelopeDate} onSortChange={setSortByEnvelopeDate} />
         </>
       )}
       {pendingReview && (
