@@ -6,9 +6,14 @@ const { PlanServiceError, assertAdminRole } = require('./planService');
 const BRANDS = ['Toyota', 'Lexus', 'Geely', 'GAC', 'Zeekr'];
 const SOURCE_LOCATIONS = ['נמל אשדוד', 'נמל חיפה', 'בונדד אשדוד', 'בונדד חיפה'];
 const QUOTA_TYPES = ['HARD', 'FLEX'];
+const POSTGRES_INTEGER_MAX = 2147483647;
 
-function isInteger(value, min) {
-  return Number.isInteger(value) && value >= min;
+function isSettingInteger(value, min) {
+  return Number.isInteger(value) && value >= min && value <= POSTGRES_INTEGER_MAX;
+}
+
+function isSettingsMap(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**
@@ -75,22 +80,25 @@ async function updateSettings({
 }) {
   assertAdminRole(actorRole);
 
-  if (dailyCapacity !== undefined && !isInteger(dailyCapacity, 1)) {
-    throw new PlanServiceError('INVALID_SETTING_VALUE', 'dailyCapacity must be an integer >= 1');
+  if (dailyCapacity !== undefined && !isSettingInteger(dailyCapacity, 1)) {
+    throw new PlanServiceError('INVALID_SETTING_VALUE', `dailyCapacity must be an integer between 1 and ${POSTGRES_INTEGER_MAX}`);
   }
-  if (envelopeYellowThresholdDays !== undefined && !isInteger(envelopeYellowThresholdDays, 0)) {
-    throw new PlanServiceError('INVALID_SETTING_VALUE', 'envelopeYellowThresholdDays must be an integer >= 0');
+  if (envelopeYellowThresholdDays !== undefined && !isSettingInteger(envelopeYellowThresholdDays, 0)) {
+    throw new PlanServiceError('INVALID_SETTING_VALUE', `envelopeYellowThresholdDays must be an integer between 0 and ${POSTGRES_INTEGER_MAX}`);
   }
-  if (envelopeRedThresholdDays !== undefined && !isInteger(envelopeRedThresholdDays, 0)) {
-    throw new PlanServiceError('INVALID_SETTING_VALUE', 'envelopeRedThresholdDays must be an integer >= 0');
+  if (envelopeRedThresholdDays !== undefined && !isSettingInteger(envelopeRedThresholdDays, 0)) {
+    throw new PlanServiceError('INVALID_SETTING_VALUE', `envelopeRedThresholdDays must be an integer between 0 and ${POSTGRES_INTEGER_MAX}`);
   }
   if (brandQuotas !== undefined) {
+    if (!isSettingsMap(brandQuotas)) {
+      throw new PlanServiceError('INVALID_SETTING_VALUE', 'brandQuotas must be an object');
+    }
     for (const [brand, quota] of Object.entries(brandQuotas)) {
       if (!BRANDS.includes(brand)) {
         throw new PlanServiceError('INVALID_SETTING_VALUE', `${brand} is not a known brand`);
       }
-      if (!quota || !isInteger(quota.quota_target, 0)) {
-        throw new PlanServiceError('INVALID_SETTING_VALUE', `${brand} quota_target must be an integer >= 0`);
+      if (!quota || !isSettingInteger(quota.quota_target, 0)) {
+        throw new PlanServiceError('INVALID_SETTING_VALUE', `${brand} quota_target must be an integer between 0 and ${POSTGRES_INTEGER_MAX}`);
       }
       if (!QUOTA_TYPES.includes(quota.quota_type)) {
         throw new PlanServiceError('INVALID_SETTING_VALUE', `${brand} quota_type must be HARD or FLEX`);
@@ -98,15 +106,15 @@ async function updateSettings({
     }
   }
   if (shippingCapacities !== undefined) {
-    if (shippingCapacities === null || typeof shippingCapacities !== 'object' || Array.isArray(shippingCapacities)) {
+    if (!isSettingsMap(shippingCapacities)) {
       throw new PlanServiceError('INVALID_SETTING_VALUE', 'shippingCapacities must be an object');
     }
     for (const [sourceLocation, capacity] of Object.entries(shippingCapacities)) {
       if (!SOURCE_LOCATIONS.includes(sourceLocation)) {
         throw new PlanServiceError('INVALID_SETTING_VALUE', `${sourceLocation} is not a known source location`);
       }
-      if (!isInteger(capacity, 0)) {
-        throw new PlanServiceError('INVALID_SETTING_VALUE', `${sourceLocation} capacity must be an integer >= 0`);
+      if (!isSettingInteger(capacity, 0)) {
+        throw new PlanServiceError('INVALID_SETTING_VALUE', `${sourceLocation} capacity must be an integer between 0 and ${POSTGRES_INTEGER_MAX}`);
       }
     }
   }

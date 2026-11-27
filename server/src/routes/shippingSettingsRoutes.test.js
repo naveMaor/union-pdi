@@ -337,6 +337,88 @@ test('settings: malformed shipping maps reject the whole update without changing
   assert.equal(updated.audit.at(-1).event_type, 'SETTINGS_CHANGED');
 });
 
+test('settings: malformed brand quota maps reject mixed updates without writes', async () => {
+  const { plan } = await getPendingShippingBaseline();
+  const before = await readPlanSettingsAndAudit(plan.id);
+
+  for (const brandQuotas of [null, 0, 32, false, true, '', 'quota', [], [32]]) {
+    const detail = `brandQuotas ${JSON.stringify(brandQuotas)}`;
+    const response = await inject(withRole('ADMIN', {
+      method: 'PUT', url: '/api/settings', payload: {
+        dailyCapacity: 195, shippingCapacities: { 'נמל חיפה': 45 }, brandQuotas,
+      },
+    }));
+    assert.equal(response.statusCode, 400, detail);
+    assert.equal(response.json().error, 'INVALID_SETTING_VALUE', detail);
+    assert.deepEqual(await readPlanSettingsAndAudit(plan.id), before, detail);
+  }
+
+  const empty = await inject(withRole('ADMIN', { method: 'PUT', url: '/api/settings', payload: { brandQuotas: {} } }));
+  assert.equal(empty.statusCode, 200);
+  assert.deepEqual(await readPlanSettingsAndAudit(plan.id), before);
+});
+
+test('settings: values above the INTEGER limit reject the whole update without writes', async () => {
+  const { plan } = await getPendingShippingBaseline();
+  const before = await readPlanSettingsAndAudit(plan.id);
+  const overflow = 2147483648;
+  const cases = [
+    { dailyCapacity: overflow },
+    { envelopeYellowThresholdDays: overflow },
+    { envelopeRedThresholdDays: overflow },
+    { brandQuotas: { Toyota: { quota_target: 54, quota_type: 'HARD' }, Lexus: { quota_target: overflow, quota_type: 'HARD' } } },
+    { shippingCapacities: { 'נמל חיפה': 45, 'נמל אשדוד': overflow } },
+  ];
+
+  for (const invalid of cases) {
+    const detail = JSON.stringify(invalid);
+    const response = await inject(withRole('ADMIN', {
+      method: 'PUT', url: '/api/settings', payload: { dailyCapacity: 195, envelopeYellowThresholdDays: 10, ...invalid },
+    }));
+    assert.equal(response.statusCode, 400, detail);
+    assert.equal(response.json().error, 'INVALID_SETTING_VALUE', detail);
+    assert.deepEqual(await readPlanSettingsAndAudit(plan.id), before, detail);
+  }
+});
+
+test('settings: INTEGER boundaries and sparse maps persist without updating the plan snapshot or membership', async (t) => {
+  const { plan } = await getPendingShippingBaseline();
+  const before = await readPlanSettingsAndAudit(plan.id);
+  t.after(async () => {
+    await db.Setting.update({
+      daily_capacity: before.settings.dailyCapacity,
+      envelope_yellow_threshold_days: before.settings.envelopeYellowThresholdDays,
+      envelope_red_threshold_days: before.settings.envelopeRedThresholdDays,
+    }, { where: { id: 1 } });
+    await db.BrandQuota.update(before.settings.brandQuotas.Toyota, { where: { brand: 'Toyota' } });
+    await db.ShippingCapacity.update({ capacity: before.settings.shippingCapacities['נמל חיפה'] }, { where: { source_location: 'נמל חיפה' } });
+  });
+
+  const max = 2147483647;
+  for (const [capacity, limit] of [[1, 0], [max, max]]) {
+    const payload = {
+      dailyCapacity: capacity,
+      envelopeYellowThresholdDays: limit,
+      envelopeRedThresholdDays: limit,
+      brandQuotas: { Toyota: { quota_target: limit, quota_type: 'FLEX' } },
+      shippingCapacities: { 'נמל חיפה': limit },
+    };
+    const response = await inject(withRole('ADMIN', { method: 'PUT', url: '/api/settings', payload }));
+    assert.equal(response.statusCode, 200);
+    const saved = await readPlanSettingsAndAudit(plan.id);
+    assert.deepEqual(saved.settings, {
+      ...before.settings, ...payload,
+      brandQuotas: { ...before.settings.brandQuotas, ...payload.brandQuotas },
+      shippingCapacities: { ...before.settings.shippingCapacities, ...payload.shippingCapacities },
+    });
+    assert.deepEqual(response.json(), saved.settings);
+    assert.deepEqual(saved.plan, before.plan);
+    assert.deepEqual(saved.membership, before.membership);
+    assert.equal(saved.audit.length, before.audit.length + (capacity === 1 ? 1 : 2));
+    assert.equal(saved.audit.at(-1).event_type, 'SETTINGS_CHANGED');
+  }
+});
+
 test('settings changes do not retroactively affect an existing plan, but a subsequent regeneration picks up the new values', async () => {
   const baseline = await getPendingShippingBaseline();
   // baseline is PENDING_SHIPPING now (submitted); return it so it's editable again for the regen step
