@@ -22,6 +22,7 @@ Prioritize correctness, simplicity, maintainability and specification compliance
 | `docs/assignment/pdi_ui_reference.png` | UI design inspiration |
 | `docs/assignment/README_CANDIDATE.txt` | Candidate and submission instructions |
 | `docs/PLAN.md` | Project implementation plan |
+| `docs/DEMO_DB.md` | Local demo database workflow (not part of the official assignment files) |
 
 ### Source Priority
 

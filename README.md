@@ -86,6 +86,12 @@ removing or recreating the `db` container does not delete this volume,
 so data survives container restarts and recreations. The volume is
 only deleted if explicitly removed (e.g. `docker compose down -v`).
 
+## Demo database
+
+A disposable second database (`union_pdi_demo`) and backup/reset scripts
+for trying things out or running a live demo without touching the
+development database. See `docs/DEMO_DB.md`.
+
 ## Authentication
 
 The application uses simulated demo roles.
