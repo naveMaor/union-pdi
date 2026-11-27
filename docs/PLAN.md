@@ -848,19 +848,27 @@ Admin browser evidence
 Status: IN PROGRESS
 
 #### Step 7.1 — SPEC compliance and acceptance audit
-- [ ] Independently audit SPEC §§4-15 and all 12 acceptance scenarios
+- [x] Independently audit SPEC §§4-15 and all 12 acceptance scenarios
   against the actual implementation and retained tests
 
 #### Step 7.2 — Code quality, security and release readiness
-- [ ] Independent release audit: reproducibility, security, configuration,
+- [x] Independent release audit: reproducibility, security, configuration,
   documentation and deployment gaps; review lint suppressions, Chrome-only
   coverage and the retained browser verifier
 
 #### Step 7.3 — Repository cleanup and reproducible installation
-- [ ] Address Batch 7A findings classified as release blockers
+- [x] Address Batch 7A findings classified as release blockers: CORS origin
+  and server bind host are now env-configurable (`CORS_ORIGIN`, `HOST`,
+  same defaults); root `.env.example` documents all 9 production env vars;
+  reproducible clean-checkout install/migrate/seed/test verified twice
+- [x] Repository hygiene: removed unused `client/README.md` (stock Vite
+  boilerplate); local AI tooling (`.agents/`, `.claude/skills/`,
+  `skills-lock.json`) gitignored, not deleted; superseded
+  `task-5a-enterprise-dashboard.png` design draft moved out of the repo,
+  preserved locally
 
 #### Step 7.4 — Final README and AI documentation
-- [ ] Complete README (install/run/test/design decisions) and SPEC §11 AI
+- [x] Complete README (install/run/test/design decisions) and SPEC §11 AI
   section
 
 #### Step 7.5 — Deployment architecture and hosting selection

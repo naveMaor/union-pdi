@@ -1,99 +1,260 @@
 
 # Union PDI
 
-Full-stack PDI (Pre-Delivery Inspection) planning
-application for Union Motors.
+Full-stack PDI (Pre-Delivery Inspection) planning application for Union
+Motors, built for the Full Stack AI-Native take-home assignment. The full
+specification is in `docs/assignment/SPEC.md` (Hebrew, authoritative).
 
-## Technology Stack
+## Role simulation is not authentication
 
-- Node.js 24
-- Fastify 5
-- PostgreSQL
-- Sequelize 6
-- React + Vite
+The application has no login. A role switcher in the header lets the
+browser act as one of three fixed demo users (`PLANNER`, `SHIPPING`,
+`ADMIN`) by sending an `x-demo-role` header with every request. **This is a
+demonstration convenience for the assignment, not a security or
+authentication mechanism.** The server enforces which role may perform
+which action, but it trusts whatever role header the client sends — there
+is no identity verification behind it. See SPEC §4.
 
-## Status
+## Technology stack
 
-Under development.
+- Node.js 24, Fastify 5, PostgreSQL, Sequelize 6 (backend)
+- React 19 + Vite (frontend)
+- Hebrew RTL interface throughout; technical identifiers (VINs, vehicle
+  IDs) render LTR
+- Docker Compose for local PostgreSQL
+- Node.js built-in test runner (`node --test`) for the backend test suite
 
-See docs/PLAN.md for the implementation plan.
+## Project layout
 
-## Assignment
+- `server/` — Fastify REST API, Sequelize models/migrations, services
+  (recommendation algorithm, plan lifecycle, blockers), route tests
+- `client/` — React + Vite frontend for all three roles
+- `docs/assignment/` — the official, read-only assignment files
+- `docs/PLAN.md` — the implementation roadmap and task-by-task log
+- `docs/AI_LOG.md` — the AI collaboration log referenced below
+- `docs/DEMO_DB.md` — optional local tooling for a second, disposable demo
+  database; not required for normal development or testing
 
-Requirements are defined in `docs/assignment/SPEC.md`.
+## Install and run locally
 
-## Development
+Prerequisites: Node.js 24 (`nvm use`), Docker, Docker Compose.
 
-Use Node.js 24:
+1. **Install dependencies**
+
+   ```bash
+   cd server && npm install
+   cd ../client && npm install
+   ```
+
+2. **Configure environment variables**
+
+   Copy the example files and fill in real values where placeholders are
+   given (see [Environment variables](#environment-variables) below for
+   what each one does — no values are listed here, only names). The
+   server (including the database connection it opens through Sequelize)
+   reads only the repository-root `.env` — there is no separate
+   `server/.env`:
+
+   ```bash
+   cp .env.example .env               # used by docker compose and by the server
+   cp client/.env.example client/.env # used by the Vite dev server
+   ```
+
+3. **Start PostgreSQL**
+
+   ```bash
+   docker compose up -d db
+   docker compose ps   # wait for status "healthy"
+   ```
+
+4. **Run migrations and seed the database**
+
+   ```bash
+   cd server
+   npm run db:migrate
+   npm run db:seed
+   ```
+
+   The seed script imports the 300 vehicles from
+   `docs/assignment/pdi_seed_300_vehicles.csv` and the default settings
+   (daily capacity, brand quotas, shipping capacities, envelope
+   thresholds). It is safe to run more than once: vehicles are inserted
+   only if missing, and already-changed settings are never reset back to
+   their defaults.
+
+5. **Start the backend**
+
+   ```bash
+   cd server
+   npm run dev     # or: npm start
+   ```
+
+   Listens on `http://127.0.0.1:3001` by default (see env vars below).
+
+6. **Start the frontend**
+
+   ```bash
+   cd client
+   npm run dev
+   ```
+
+   Open the printed Vite URL (default `http://localhost:5173`).
+
+## Environment variables
+
+Names only — see `.env.example` and `client/.env.example` for the exact
+files and their defaults for local development. Never commit a `.env` file
+with real values.
+
+Root `.env` (read by `docker compose`, and by the server via
+`dotenv`/Sequelize's config — both the server and Sequelize CLI resolve
+this same root file; there is no separate `server/.env`):
+
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` — database
+  connection credentials, used both by the Docker Compose Postgres
+  container and by the server to connect to it
+- `DB_HOST`, `DB_PORT` — database host/port (defaults match the Docker
+  Compose service)
+- `PORT` — port the Fastify server listens on
+- `HOST` — interface the Fastify server binds to
+- `CORS_ORIGIN` — the single frontend origin allowed to call the API
+- `NODE_ENV` — `development` or `test`; also set automatically by the test
+  suite
+
+`client/.env`:
+
+- `VITE_API_BASE_URL` — base URL the frontend uses to reach the API
+
+## Running tests
+
+Backend (100 tests at time of writing — model/service unit tests and
+Fastify route integration tests, run against real, isolated,
+PID-suffixed PostgreSQL databases that are created and dropped per test
+file; the shared development database is never touched):
 
 ```bash
-nvm use
+cd server
+npm test
 ```
 
-Further setup and deployment instructions will
-be added as implementation progresses.
+Frontend: there is no dedicated frontend unit/component test suite.
+Frontend correctness was verified during development through:
 
-## Database (PostgreSQL via Docker Compose)
+- `npm run build` and `npm run lint` (`oxlint`) in `client/`, both clean
+- `client/scripts/verify-batch-b2.cjs`, a retained end-to-end browser
+  verifier. It launches a real headless `google-chrome` (controlled
+  directly over the Chrome DevTools Protocol, no browser-automation
+  dependency), a real Fastify server, a real Vite dev server, and a real,
+  disposable, CSV-seeded PostgreSQL database, then drives all three role
+  screens through the SPEC §14 acceptance scenarios and compares
+  before/after fingerprints of every development table. It is not wired
+  into `npm test` or CI and must be run manually:
 
-PostgreSQL runs locally through Docker Compose (`compose.yaml` in the
-project root).
+  ```bash
+  node client/scripts/verify-batch-b2.cjs
+  ```
 
-### Environment variables
+  Requires `google-chrome` on `PATH` (or set `PDI_CHROME_BIN` to a Chrome
+  executable). Add `--screenshots` to refresh all retained screenshots in
+  `docs/design/`, or one of `--admin-screenshots` /
+  `--shipping-screenshots` / `--b3-screenshots` to refresh a subset.
 
-Copy `.env.example` to `.env` and fill in a real password before
-starting the database. Required variables:
+## Design decisions and tradeoffs
 
-- `POSTGRES_DB` — database name (`union_pdi`)
-- `POSTGRES_USER` — database user (`pdi`)
-- `POSTGRES_PASSWORD` — database password (not committed to Git)
+- **Single-pass recommendation algorithm** (`server/src/services/
+  recommendation.js`) is a pure function with no database or HTTP
+  dependency, so it is unit-testable in isolation from persistence (SPEC
+  §7).
+- **Plan snapshots**: `capacity_snapshot` and `brand_quotas_snapshot` are
+  frozen on every recommendation run so that a later Admin settings change
+  never silently alters an already-generated plan (SPEC §5.3); shipping
+  capacity is deliberately read live, only at approval time.
+- **Manual exclusions** live in their own table and are reapplied on every
+  regeneration; manual additions are not persisted as a separate concept
+  and are cleared on regeneration, per SPEC §8.2.
+- **Role enforcement** happens entirely server-side off the `x-demo-role`
+  header; the actor's display name is resolved server-side from the role,
+  never trusted from client input, so the audit log cannot be forged by
+  the client.
+- **No automated frontend test suite** — this was a deliberate scope
+  tradeoff to avoid adding a new test-framework dependency mid-project;
+  frontend correctness instead relies on TypeScript-free build/lint checks
+  plus the real-browser verifier described above. This is a known gap, not
+  an oversight.
 
-### Start PostgreSQL
+## AI usage (SPEC §11)
 
-```bash
-docker compose up -d db
-```
+AI tools were used throughout this project's development, coordinated as
+three Claude Code roles (an orchestrator session plus named `builder` and
+`validator` agents communicating directly) working against the shared
+specification in `docs/assignment/SPEC.md`. The full, chronological,
+factual record — including specific defects found and how they were fixed,
+agent disagreements, and human interventions — is in `docs/AI_LOG.md`;
+this section summarizes it.
 
-### Check status
+**Tools and models.** Claude Code, running Claude Sonnet 5 (orchestrator
+and both named agents). External review from ChatGPT (model version
+confirmed for only one of the two consultations — see `docs/AI_LOG.md`
+for exactly what is and isn't confirmed) was used twice as a second
+opinion, relayed into the session by the human developer; no other AI
+tool or model was used on this project, and no image-generation tool was
+used — the UI reference mockup is the one supplied with the assignment,
+not AI-generated.
 
-```bash
-docker compose ps
-```
+**How collaboration worked.** The Builder proposed each design (database
+schema, service logic, API contracts, UI); the Validator independently
+re-derived the same requirements from SPEC.md before reviewing Builder's
+code, rather than reviewing against Builder's own reasoning, and owned all
+automated tests. Disagreements were resolved directly between the two
+agents over native agent-to-agent messaging, with specification evidence
+cited on both sides; the human developer approved every architectural
+decision, every new dependency and every commit. Nothing was committed or
+deployed without explicit human approval at each step.
 
-The container is ready for connections once its status shows `healthy`
-(based on a `pg_isready` health check).
+**Where AI agents made mistakes, and how they were caught.** Concrete,
+non-exhaustive examples from `docs/AI_LOG.md` (see that file for the full
+list and exact detail):
 
-### Stop PostgreSQL
+- Builder's first schema draft typed `vehicles.population` as `INTEGER`
+  from the SPEC's prose alone, without checking the actual CSV; the human
+  developer caught this by parsing the CSV directly, and Builder then
+  re-verified every other column's real values against the CSV before the
+  schema was finalized.
+- Two Sequelize models (`planVehicle.js`, `manualExclusion.js`) silently
+  failed every `.create()` call because they left Sequelize's default
+  `createdAt: true` active against migrations that never created a
+  `created_at` column — caught by Validator's first integration test run,
+  not by earlier manual SQL checks.
+- A concurrency bug in `planService.js` (concurrent `Promise.all` reads on
+  a single `pg` connection, which does not support that) was found and
+  fixed by Builder during its own self-test, before handoff to Validator.
+- An off-by-one in the recommendation algorithm selected one vehicle when
+  daily capacity was configured to `0`, found by Validator, independently
+  reproduced by the orchestrator, and fixed by Builder with a dedicated
+  regression test added.
+- A Builder agent ran a full migrate/rollback/migrate cycle against the
+  shared development database instead of an isolated test database during
+  self-verification; investigated directly rather than assumed, and
+  traced to an instruction-scoping gap (the isolation rule had been
+  repeated to the Validator but not to the Builder for that round). No
+  data loss occurred, but the orchestrator's instructions to agents were
+  corrected going forward to always restate the rule explicitly.
 
-```bash
-docker compose stop db
-```
+**What the human developer wrote or changed manually.** The human
+developer authored `CLAUDE.md`'s collaboration protocol, reviewed and
+approved every design proposal and commit, made the final call on every
+open architectural question raised by agents or by external review (for
+example, the manual-exclusions table design), and directly inspected the
+database and ran independent verification commands at multiple
+checkpoints rather than relying solely on agent self-reports. `docs/
+AI_LOG.md` records specific human interventions inline, including the two
+defects the human developer caught personally (the `population` column
+type and the dev-database rollback incident) before Builder or Validator
+caught them independently.
 
-This stops the container without deleting its data volume. To remove
-the container and volume entirely (**this deletes all data**), use
-`docker compose down -v` — do this only intentionally.
+## Remaining limitations
 
-### Connect with psql
-
-```bash
-docker compose exec db psql -U pdi -d union_pdi
-```
-
-### Persistence
-
-PostgreSQL stores its data files on a named Docker volume
-(`pdi_db_data`), separate from the container itself. Stopping,
-removing or recreating the `db` container does not delete this volume,
-so data survives container restarts and recreations. The volume is
-only deleted if explicitly removed (e.g. `docker compose down -v`).
-
-## Demo database
-
-A disposable second database (`union_pdi_demo`) and backup/reset scripts
-for trying things out or running a live demo without touching the
-development database. See `docs/DEMO_DB.md`.
-
-## Authentication
-
-The application uses simulated demo roles.
-Role simulation is not a production security
-or authentication mechanism.
+- No dedicated automated frontend test suite (see above).
+- Deployment: at the time of writing the application is not yet deployed
+  to a public host; see `docs/PLAN.md` Task 7 for the in-progress
+  deployment plan.
